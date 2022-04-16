@@ -1,4 +1,4 @@
-module github.com/lupoh/mysql-schema-sync
+module github.com/luoph/mysql-schema-sync
 
 go 1.13
 
