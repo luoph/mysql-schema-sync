@@ -43,14 +43,18 @@ type TableAlterData struct {
 func (ta *TableAlterData) String() string {
 	relationTables := ta.SchemaDiff.RelationTables()
 	sqlTpl := `
--- Table : %s
--- Type  : %s
--- RelationTables : %s
--- Comment: %s
--- SQL   :
-%s
+-- Table  : %s
+-- Type   : %s
 `
-	return fmt.Sprintf(sqlTpl, ta.Table, ta.Type, strings.Join(relationTables, ","), ta.Comment, strings.Join(ta.SQL, "\n"))
+	content := fmt.Sprintf(sqlTpl, ta.Table, ta.Type)
+	if len(relationTables) > 0 {
+		content += fmt.Sprintf("-- RelationTables: %s\n", strings.Join(relationTables, ","))
+	}
+	if len(ta.Comment) > 0 {
+		content += fmt.Sprintf("-- Comment: %s\n", ta.Comment)
+	}
+	content += strings.Join(ta.SQL, ",")
+	return content
 }
 
 var autoIncrReg = regexp.MustCompile(`\sAUTO_INCREMENT=[1-9]\d*\s`)
