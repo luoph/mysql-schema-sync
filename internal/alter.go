@@ -47,7 +47,7 @@ func (ta *TableAlterData) String() string {
 -- Type  : %s
 -- RelationTables : %s
 -- Comment: %s
--- SQL   : 
+-- SQL   :
 %s
 `
 	return fmt.Sprintf(sqlTpl, ta.Table, ta.Type, strings.Join(relationTables, ","), ta.Comment, strings.Join(ta.SQL, "\n"))
