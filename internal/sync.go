@@ -317,7 +317,7 @@ func CheckSchemaDiff(cfg *Config) {
 		}
 
 		if cfg.CheckMatchIgnoreTables(table) {
-			log.Println("Table:", table, "skipped by ignore")
+			log.Println("table:", table, "skipped by ignore")
 			continue
 		}
 
@@ -329,8 +329,10 @@ func CheckSchemaDiff(cfg *Config) {
 		}
 
 		if sd.Type == alterTypeDropTable {
-			log.Println("skipped table", table, ",only exists in dest's db")
-			continue
+			if !sc.Config.Drop {
+				continue
+			}
+			log.Println("drop table", table, ", only exists in dest's db")
 		}
 
 		fmt.Println(sd)
