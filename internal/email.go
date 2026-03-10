@@ -95,6 +95,6 @@ func (m *EmailStruct) SendMail(title string, body string) {
 func mailBody(body string) string {
 	body = tableStyle + "\n" + body
 	body += "<br/><hr style='border:none;border-top:1px solid #ccc'/>" +
-		"<center>Powered by <a href='" + AppURL + "'>mysql-schema-sync</a>&nbsp;" + Version + "</center>"
+		"<center>Powered by <a href='" + AppURL + "'>db-schema-sync</a>&nbsp;" + Version + "</center>"
 	return body
 }

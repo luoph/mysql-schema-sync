@@ -10,7 +10,7 @@ exec 1>>log/sync.log.`date +"%Y%m%d"` 2>&1
 
 for f in `ls *.json`
 do
-        ./mysql-schema-sync -conf $f -sync
+        ./db-schema-sync -conf $f -sync
 done
 
 

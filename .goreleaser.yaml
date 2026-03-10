@@ -1,4 +1,4 @@
-project_name: mysql-schema-sync
+project_name: db-schema-sync
 before:
   hooks:
     - go mod tidy
@@ -11,7 +11,7 @@ builds:
     goarch:
       - amd64
       - arm64
-    id: mysql-schema-sync
+    id: db-schema-sync
 archives:
   - replacements:
       darwin: Darwin
@@ -21,11 +21,11 @@ archives:
 nfpms:
   # note that this is an array of nfpm configs
   -
-    id: mysql-schema-sync
-    package_name: mysql-schema-sync
+    id: db-schema-sync
+    package_name: db-schema-sync
     file_name_template: "{{ .ConventionalFileName }}"
     builds:
-      - mysql-schema-sync
+      - db-schema-sync
     vendor: Drum Roll Inc.
     homepage: https://example.com/
     maintainer: Drummer <drum-roll@example.com>

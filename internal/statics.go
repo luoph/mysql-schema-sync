@@ -211,7 +211,7 @@ func (s *statics) sendMailNotice(cfg *Config) {
 }
 
 func startWebServer(addr string) {
-	fp := filepath.Join(os.TempDir(), "mysql-schema-sync_last.html")
+	fp := filepath.Join(os.TempDir(), "db-schema-sync_last.html")
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		bf, err := os.ReadFile(fp)
 		if err != nil {
@@ -229,7 +229,7 @@ func startWebServer(addr string) {
 }
 
 func writeHTMLResult(str string) {
-	fp := filepath.Join(os.TempDir(), "mysql-schema-sync_last.html")
+	fp := filepath.Join(os.TempDir(), "db-schema-sync_last.html")
 	if len(htmlResultPath) > 0 {
 		fp = htmlResultPath
 	}

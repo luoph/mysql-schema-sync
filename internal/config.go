@@ -164,7 +164,7 @@ func (cfg *Config) SendMailFail(errStr string) {
 		return
 	}
 	_host, _ := os.Hostname()
-	title := "[mysql-schema-sync][" + _host + "]failed"
+	title := "[db-schema-sync][" + _host + "]failed"
 	body := "error:<font color=red>" + errStr + "</font><br/>"
 	body += "host:" + _host + "<br/>"
 	body += "config-file:" + cfg.ConfigPath + "<br/>"

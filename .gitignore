@@ -25,7 +25,7 @@ _testmain.go
 .DS_Store
 log/
 .idea/
-mysql-schema-sync
+db-schema-sync
 vendor
 mydb_conf.json
 db_alter.sql
