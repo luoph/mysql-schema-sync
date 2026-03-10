@@ -44,8 +44,11 @@ func Execute(cfg *Config) {
 			xcolor.Yellow("table %q not changed", table)
 			continue
 		case alterTypeDropTable:
-			xcolor.Yellow("table %q skipped, only exists in destination's database", table)
-			continue
+			if !sc.Config.Drop {
+				xcolor.Yellow("table %q skipped, only exists in destination's database", table)
+				continue
+			}
+			xcolor.Yellow("drop table %q, only exists in destination's database", table)
 		default:
 		}
 

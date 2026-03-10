@@ -102,7 +102,7 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 	if len(sSchema) == 0 {
 		alter.Type = alterTypeDropTable
 		alter.Comment = "源数据库不存在，删除目标数据库多余的表"
-		alter.SQL = append(alter.SQL, fmt.Sprintf("drop table `%s`;", table))
+		alter.SQL = append(alter.SQL, fmt.Sprintf("DROP TABLE `%s`;", table))
 		return alter
 	}
 	if len(dSchema) == 0 {
