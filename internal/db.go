@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // mysql driver
 	"github.com/xanygo/anygo/cli/xcolor"
 )
 
@@ -43,7 +42,7 @@ func (f *FieldInfo) needsQuotedDefault() bool {
 	return slices.Contains(stringTypes, dataType)
 }
 
-// String returns the full column definition as used in CREATE TABLE
+// String returns the full column definition as used in MySQL CREATE TABLE
 func (f *FieldInfo) String() string {
 	var parts []string
 
@@ -89,7 +88,7 @@ func (f *FieldInfo) String() string {
 	return strings.Join(parts, " ")
 }
 
-// Equals compares two FieldInfo instances for semantic equality
+// Equals compares two FieldInfo instances for semantic equality (MySQL-specific)
 func (f *FieldInfo) Equals(other *FieldInfo) bool {
 	if f == nil || other == nil {
 		return f == other
@@ -124,10 +123,6 @@ func (f *FieldInfo) Equals(other *FieldInfo) bool {
 	}
 
 	// Compare character set and collation (handle NULL values gracefully)
-	// For charset and collation, we consider them equal if:
-	// 1. Both are NULL, or
-	// 2. One is NULL and the other uses the default/collation, or
-	// 3. Both are set and equal
 	if !f.charsetEquals(other) || !f.collationEquals(other) {
 		return false
 	}
@@ -137,34 +132,24 @@ func (f *FieldInfo) Equals(other *FieldInfo) bool {
 
 // charsetEquals checks if character sets are semantically equal
 func (f *FieldInfo) charsetEquals(other *FieldInfo) bool {
-	// Both NULL
 	if f.CharsetName == nil && other.CharsetName == nil {
 		return true
 	}
-
-	// One NULL, one not NULL
 	if (f.CharsetName == nil) != (other.CharsetName == nil) {
-		// If one is NULL, check if the other is the default charset
 		if f.CharsetName != nil {
 			return *f.CharsetName == "utf8mb4" || *f.CharsetName == "utf8" || *f.CharsetName == "latin1"
 		}
 		return *other.CharsetName == "utf8mb4" || *other.CharsetName == "utf8" || *other.CharsetName == "latin1"
 	}
-
-	// Both not NULL, compare values
 	return *f.CharsetName == *other.CharsetName
 }
 
 // collationEquals checks if collations are semantically equal
 func (f *FieldInfo) collationEquals(other *FieldInfo) bool {
-	// Both NULL
 	if f.CollationName == nil && other.CollationName == nil {
 		return true
 	}
-
-	// One NULL, one not NULL
 	if (f.CollationName == nil) != (other.CollationName == nil) {
-		// If one is NULL, check if the other is the default collation
 		if f.CollationName != nil {
 			return *f.CollationName == "utf8mb4_general_ci" ||
 				*f.CollationName == "utf8mb4_unicode_ci" ||
@@ -176,195 +161,65 @@ func (f *FieldInfo) collationEquals(other *FieldInfo) bool {
 			*other.CollationName == "utf8_general_ci" ||
 			*other.CollationName == "latin1_swedish_ci"
 	}
-
-	// Both not NULL, compare values
 	return *f.CollationName == *other.CollationName
 }
 
 type dbType string
 
 const (
-	dbTypeSource = "source"
-	dbTypeDest   = "dest"
+	dbTypeSource dbType = "source"
+	dbTypeDest   dbType = "dest"
 )
 
 // MyDb db struct
 type MyDb struct {
-	sqlDB  *sql.DB
-	dbType dbType
-	dbName string // 数据库名称
+	sqlDB   *sql.DB
+	dbType  dbType
+	dbName  string // 数据库名称
+	dialect Dialect
 }
 
-// NewMyDb parse dsn
+// NewMyDb parse dsn and create database connection
 func NewMyDb(dsn string, dbType dbType) *MyDb {
-	db, err := sql.Open("mysql", dsn)
+	dialect := DetectDialect(dsn)
+	db, err := sql.Open(dialect.DriverName(), dsn)
 	if err != nil {
 		panic(fmt.Sprintf("connected to db [%s] failed,err=%s", dsn, err))
 	}
-	dbName, err := getDatabaseName(db)
+	dbName, err := dialect.GetDatabaseName(db)
 	if err != nil {
 		panic(fmt.Sprintf("get database name failed,err=%s", err))
 	}
 	return &MyDb{
-		sqlDB:  db,
-		dbType: dbType,
-		dbName: dbName,
+		sqlDB:   db,
+		dbType:  dbType,
+		dbName:  dbName,
+		dialect: dialect,
 	}
-}
-
-// getDatabaseName extracts database name from the current database connection
-func getDatabaseName(db *sql.DB) (string, error) {
-	var dbName string
-	const query = "SELECT DATABASE()"
-	err := db.QueryRow(query).Scan(&dbName)
-	if err != nil {
-		log.Printf("QueryRow %q, Result=%q, Err=%v", query, dbName, err)
-	}
-	return dbName, err
 }
 
 // GetTableNames table names
 func (db *MyDb) GetTableNames() []string {
-	rs, err := db.Query("show table status")
+	tables, err := db.dialect.GetTableNames(db.sqlDB)
 	if err != nil {
-		panic("show tables failed:" + err.Error())
-	}
-	defer rs.Close()
-
-	var tables []string
-	columns, _ := rs.Columns()
-	for rs.Next() {
-		var values = make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rs.Scan(valuePtrs...); err != nil {
-			panic("show tables failed when scan," + err.Error())
-		}
-		var valObj = make(map[string]any)
-		for i, col := range columns {
-			var v any
-			val := values[i]
-			b, ok := val.([]byte)
-			if ok {
-				v = string(b)
-			} else {
-				v = val
-			}
-			valObj[col] = v
-		}
-		if valObj["Engine"] != nil {
-			tables = append(tables, valObj["Name"].(string))
-		}
+		panic("get table names failed:" + err.Error())
 	}
 	return tables
 }
 
 // GetTableSchema table schema
 func (db *MyDb) GetTableSchema(name string) (schema string) {
-	rs, err := db.Query(fmt.Sprintf("show create table `%s`", name))
+	s, err := db.dialect.GetTableSchema(db.sqlDB, db.dbName, name)
 	if err != nil {
-		return
+		log.Printf("get table %s schema failed: %s", name, errString(err))
+		return ""
 	}
-	defer rs.Close()
-	for rs.Next() {
-		var vname string
-		if err := rs.Scan(&vname, &schema); err != nil {
-			panic(fmt.Sprintf("get table %s 's schema failed, %s", name, err))
-		}
-	}
-	return
+	return s
 }
 
-// TableFieldsFromInformationSchema retrieves detailed field information from INFORMATION_SCHEMA.COLUMNS
+// TableFieldsFromInformationSchema retrieves detailed field information
 func (db *MyDb) TableFieldsFromInformationSchema(tableName string) (map[string]*FieldInfo, error) {
-	const query = `
-		SELECT
-			COLUMN_NAME,
-			ORDINAL_POSITION,
-			COLUMN_DEFAULT,
-			IS_NULLABLE,
-			DATA_TYPE,
-			CHARACTER_MAXIMUM_LENGTH,
-			NUMERIC_PRECISION,
-			NUMERIC_SCALE,
-			CHARACTER_SET_NAME,
-			COLLATION_NAME,
-			COLUMN_TYPE,
-			COLUMN_COMMENT,
-			EXTRA
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-		ORDER BY ORDINAL_POSITION`
-
-	rows, err := db.Query(query, db.dbName, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query INFORMATION_SCHEMA.COLUMNS for table %q: %v", tableName, err)
-	}
-	defer rows.Close()
-
-	fields := make(map[string]*FieldInfo)
-
-	for rows.Next() {
-		field := &FieldInfo{}
-		var charMaxLen, numericPrecision, numericScale sql.NullInt64
-		var charset, collation, columnDefault sql.NullString
-
-		err := rows.Scan(
-			&field.ColumnName,
-			&field.OrdinalPosition,
-			&columnDefault,
-			&field.IsNullAble,
-			&field.DataType,
-			&charMaxLen,
-			&numericPrecision,
-			&numericScale,
-			&charset,
-			&collation,
-			&field.ColumnType,
-			&field.ColumnComment,
-			&field.Extra,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan field information for table %q: %v", tableName, err)
-		}
-
-		// Handle nullable fields
-		if columnDefault.Valid {
-			field.ColumnDefault = &columnDefault.String
-		}
-		if charMaxLen.Valid {
-			val := int(charMaxLen.Int64)
-			field.CharacterMaximumLength = &val
-		}
-		if numericPrecision.Valid {
-			val := int(numericPrecision.Int64)
-			field.NumericPrecision = &val
-		}
-		if numericScale.Valid {
-			val := int(numericScale.Int64)
-			field.NumericScale = &val
-		}
-		if charset.Valid {
-			field.CharsetName = &charset.String
-		}
-		if collation.Valid {
-			field.CollationName = &collation.String
-		}
-
-		fields[field.ColumnName] = field
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating field information for table %q: %v", tableName, err)
-	}
-
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("no fields found for table %q in database %q", tableName, db.dbName)
-	}
-
-	return fields, nil
+	return db.dialect.GetTableFields(db.sqlDB, db.dbName, tableName)
 }
 
 // Query execute sql query

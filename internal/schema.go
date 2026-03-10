@@ -124,22 +124,12 @@ func newSchemaDiff(table, source, dest string) *SchemaDiff {
 	}
 }
 
-// NewSchemaWithFieldInfos creates a MySchema with structured field information
-func NewSchemaWithFieldInfos(schema string, fieldInfos map[string]*FieldInfo) *MySchema {
-	mys := ParseSchema(schema)
+// NewSchemaWithFieldInfos populates a MySchema with structured field information
+func NewSchemaWithFieldInfos(mys *MySchema, fieldInfos map[string]*FieldInfo) *MySchema {
 	if mys != nil {
 		mys.FieldInfos = fieldInfos
 	}
 	return mys
-}
-
-// NewSchemaDiffWithFieldInfos creates a SchemaDiff with structured field information
-func NewSchemaDiffWithFieldInfos(table, sourceSchema, destSchema string, sourceFields, destFields map[string]*FieldInfo) *SchemaDiff {
-	return &SchemaDiff{
-		Table:  table,
-		Source: NewSchemaWithFieldInfos(sourceSchema, sourceFields),
-		Dest:   NewSchemaWithFieldInfos(destSchema, destFields),
-	}
 }
 
 func (sdiff *SchemaDiff) RelationTables() []string {
