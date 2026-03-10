@@ -17,7 +17,7 @@ import (
 	"github.com/xanygo/anygo/cli/xcolor"
 	"github.com/xanygo/anygo/xt"
 
-	"github.com/hidu/mysql-schema-sync/internal"
+	"github.com/luoph/mysql-schema-sync/internal"
 )
 
 func TestWithDB(t *testing.T) {
