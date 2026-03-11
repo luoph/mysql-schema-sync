@@ -353,10 +353,12 @@ func pgNormalizeColumnType(colType string) string {
 
 // PostgreSQL constraint/index line parsing regexes
 var (
-	pgPrimaryKeyReg = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+PRIMARY\s+KEY\s*\((.+)\)`)
-	pgUniqueKeyReg  = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+UNIQUE\s*\((.+)\)`)
-	pgForeignKeyReg = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+FOREIGN\s+KEY\s*\(.+\)\s+REFERENCES\s+"([^"]+)"`)
-	pgCheckReg      = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\((.+)\)`)
+	pgPrimaryKeyReg      = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+PRIMARY\s+KEY\s*\((.+)\)`)
+	pgUniqueKeyReg       = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+UNIQUE\s*\((.+)\)`)
+	pgForeignKeyReg      = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+FOREIGN\s+KEY\s*\(.+\)\s+REFERENCES\s+"([^"]+)"`)
+	pgCheckReg           = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\((.+)\)`)
+	pgNotNullReg         = regexp.MustCompile(`(?i)^CONSTRAINT\s+"([^"]+)"\s+NOT\s+NULL(?:\s+|$)`)
+	pgConstraintPrefixRe = regexp.MustCompile(`(?i)^CONSTRAINT\s+"[^"]+"\s+`)
 )
 
 func (p *PostgresDialect) ParseSchema(schema string) *MySchema {
@@ -398,7 +400,16 @@ func (p *PostgresDialect) ParseSchema(schema string) *MySchema {
 
 func (p *PostgresDialect) parsePgIndexLine(line string) *DbIndex {
 	line = strings.TrimSpace(line)
-	idx := &DbIndex{SQL: line, RelationTables: []string{}}
+
+	// Skip NOT NULL constraints — already represented in column definitions
+	if pgNotNullReg.MatchString(line) {
+		return nil
+	}
+
+	// Strip CONSTRAINT "name" prefix to store only the definition part (e.g. PRIMARY KEY (...), UNIQUE (...))
+	// This avoids duplication when GenAddIndex prepends ADD CONSTRAINT "name"
+	defSQL := pgConstraintPrefixRe.ReplaceAllString(line, "")
+	idx := &DbIndex{SQL: defSQL, RelationTables: []string{}}
 
 	if matches := pgPrimaryKeyReg.FindStringSubmatch(line); len(matches) > 0 {
 		idx.IndexType = indexTypePrimary
@@ -407,7 +418,7 @@ func (p *PostgresDialect) parsePgIndexLine(line string) *DbIndex {
 	}
 
 	if matches := pgUniqueKeyReg.FindStringSubmatch(line); len(matches) > 0 {
-		idx.IndexType = indexTypeIndex
+		idx.IndexType = indexTypeUnique
 		idx.Name = matches[1]
 		return idx
 	}
@@ -550,17 +561,14 @@ func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop b
 		}
 	}
 
+	// Defensive: strip any residual CONSTRAINT "name" prefix from idx.SQL
+	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
+
 	switch idx.IndexType {
-	case indexTypePrimary:
-		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, idx.SQL))
+	case indexTypePrimary, indexTypeUnique, checkConstraint:
+		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	case indexTypeIndex:
-		if strings.Contains(strings.ToUpper(idx.SQL), "UNIQUE") {
-			sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, idx.SQL))
-		} else {
-			sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, idx.SQL))
-		}
-	case checkConstraint:
-		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, idx.SQL))
+		sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
 	}
 
 	return sqls
@@ -568,12 +576,9 @@ func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop b
 
 func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {
 	switch idx.IndexType {
-	case indexTypePrimary, checkConstraint:
+	case indexTypePrimary, checkConstraint, indexTypeUnique:
 		return fmt.Sprintf(`DROP CONSTRAINT "%s"`, idx.Name)
 	case indexTypeIndex:
-		if strings.Contains(strings.ToUpper(idx.SQL), "UNIQUE") {
-			return fmt.Sprintf(`DROP CONSTRAINT "%s"`, idx.Name)
-		}
 		return fmt.Sprintf(`DROP INDEX "%s";`, idx.Name)
 	}
 	return ""
@@ -584,7 +589,9 @@ func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needD
 	if needDrop {
 		sqls = append(sqls, p.GenDropForeignKey(tableName, idx))
 	}
-	sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, idx.SQL))
+	// Defensive: strip any residual CONSTRAINT "name" prefix from idx.SQL
+	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
+	sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	return sqls
 }
 

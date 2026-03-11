@@ -23,6 +23,7 @@ type indexType string
 const (
 	indexTypePrimary    indexType = "PRIMARY"
 	indexTypeIndex      indexType = "INDEX"
+	indexTypeUnique     indexType = "UNIQUE"
 	indexTypeForeignKey indexType = "FOREIGN KEY"
 	checkConstraint     indexType = "CHECK"
 )
@@ -39,7 +40,7 @@ func (idx *DbIndex) alterAddSQL(drop bool) []string {
 	switch idx.IndexType {
 	case indexTypePrimary:
 		alterSQL = append(alterSQL, "ADD "+idx.SQL)
-	case indexTypeIndex, indexTypeForeignKey:
+	case indexTypeIndex, indexTypeUnique, indexTypeForeignKey:
 		alterSQL = append(alterSQL, fmt.Sprintf("ADD %s", idx.SQL))
 	case checkConstraint:
 		alterSQL = append(alterSQL, fmt.Sprintf("ADD %s", idx.SQL))
@@ -58,7 +59,7 @@ func (idx *DbIndex) alterDropSQL() string {
 	switch idx.IndexType {
 	case indexTypePrimary:
 		return "DROP PRIMARY KEY"
-	case indexTypeIndex:
+	case indexTypeIndex, indexTypeUnique:
 		return fmt.Sprintf("DROP INDEX `%s`", idx.Name)
 	case indexTypeForeignKey:
 		return fmt.Sprintf("DROP FOREIGN KEY `%s`", idx.Name)
@@ -104,7 +105,11 @@ func parseDbIndexLine(line string) *DbIndex {
 	// KEY `idx_e` (`e`),
 	if indexReg.MatchString(line) {
 		arr := strings.Split(line, "`")
-		idx.IndexType = indexTypeIndex
+		if strings.HasPrefix(strings.ToUpper(line), "UNIQUE") {
+			idx.IndexType = indexTypeUnique
+		} else {
+			idx.IndexType = indexTypeIndex
+		}
 		idx.Name = arr[1]
 		return idx
 	}

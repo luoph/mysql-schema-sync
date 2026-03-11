@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/xanygo/anygo/xt"
@@ -241,7 +242,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	})
 
 	t.Run("add unique constraint", func(t *testing.T) {
-		idx := &DbIndex{IndexType: indexTypeIndex, Name: "uq_email", SQL: `UNIQUE ("email")`}
+		idx := &DbIndex{IndexType: indexTypeUnique, Name: "uq_email", SQL: `UNIQUE ("email")`}
 		sqls := d.GenAddIndex("test", idx, false)
 		xt.Equal(t, 1, len(sqls))
 		xt.Equal(t, `ADD CONSTRAINT "uq_email" UNIQUE ("email")`, sqls[0])
@@ -411,6 +412,7 @@ func TestPgCleanDefault(t *testing.T) {
 func TestPostgresDialect_getAlterDataBySchema(t *testing.T) {
 	tests := []struct {
 		name    string
+		table   string
 		sSchema string
 		dSchema string
 		cfg     *Config
@@ -418,6 +420,7 @@ func TestPostgresDialect_getAlterDataBySchema(t *testing.T) {
 	}{
 		{
 			name:    "pg user 0->1: add missing columns",
+			table:   "user",
 			sSchema: testLoadFile("testdata/pg/user_0.sql"),
 			dSchema: testLoadFile("testdata/pg/user_1.sql"),
 			cfg:     &Config{},
@@ -425,10 +428,19 @@ func TestPostgresDialect_getAlterDataBySchema(t *testing.T) {
 		},
 		{
 			name:    "pg user 1->0: reverse (no change, dest has more columns)",
+			table:   "user",
 			sSchema: testLoadFile("testdata/pg/user_1.sql"),
 			dSchema: testLoadFile("testdata/pg/user_0.sql"),
 			cfg:     &Config{},
 			want:    testLoadFile("testdata/pg/result_2.sql"),
+		},
+		{
+			name:    "pg constraint rename: same definition, different name",
+			table:   "user_audio",
+			sSchema: testLoadFile("testdata/pg/user_audio_src.sql"),
+			dSchema: testLoadFile("testdata/pg/user_audio_dst.sql"),
+			cfg:     &Config{Drop: true},
+			want:    testLoadFile("testdata/pg/result_constraint_rename.sql"),
 		},
 	}
 
@@ -440,9 +452,9 @@ func TestPostgresDialect_getAlterDataBySchema(t *testing.T) {
 					dialect: &PostgresDialect{},
 				},
 			}
-			got := sc.getAlterDataBySchema("user", tt.sSchema, tt.dSchema, tt.cfg)
+			got := sc.getAlterDataBySchema(tt.table, tt.sSchema, tt.dSchema, tt.cfg)
 			t.Log("got alter:\n", got.String())
-			xt.Equal(t, tt.want, got.String())
+			xt.Equal(t, strings.TrimSpace(tt.want), strings.TrimSpace(got.String()))
 		})
 	}
 }
