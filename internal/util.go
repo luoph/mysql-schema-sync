@@ -13,7 +13,7 @@ import (
 )
 
 // Version 版本号，格式：更新日期(8位).更新次数(累加)
-const Version = "20251021.4"
+const Version = "20260310.1"
 
 // AppURL site
 const AppURL = "https://github.com/luoph/mysql-schema-sync/"

@@ -28,6 +28,27 @@
 go install github.com/luoph/mysql-schema-sync@master
 ```
 
+## 打包部署
+
+项目提供了一个 `build.sh` 脚本，用于快速交叉编译并生成多平台的压缩包。
+
+```bash
+# 执行打包脚本
+bash build.sh
+```
+
+运行后，打包结果将生成在 `target/dist/` 目录下，包含以下平台的压缩包：
+
+- Linux (amd64, arm64)
+- Darwin (amd64, arm64)
+- Windows (amd64)
+
+每个压缩包内均包含：
+
+- `db-schema-sync` 二进制文件
+- `config.json` 示例配置文件
+- `README.md` 和 `LICENSE` 文件
+
 ## 配置
 
 参考默认配置文件 config.json 配置同步源、目的地址。
@@ -75,6 +96,7 @@ go install github.com/luoph/mysql-schema-sync@master
 ```
 
 DSN 自动识别规则：
+
 - `postgres://` 或 `postgresql://` 开头 → PostgreSQL
 - 包含 `host=` → PostgreSQL（keyword 格式）
 - 其他 → MySQL

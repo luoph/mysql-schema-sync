@@ -1,0 +1,22 @@
+{
+     "source":"test:test@(127.0.0.1:3306)/test",
+     "dest":"test:test@(127.0.0.1:3306)/test_1",
+     "alter_ignore":{
+        "tb1*":{
+            "column":["aaa","a*"],
+            "index":["aa"],
+            "foreign":[]
+        }
+     },
+     //  tables: table to check schema,default is all.eg :["order_*","goods"]
+     "tables":[],
+     //  tables_ignore: table to ignore check schema,default is Null :["order_*","goods"]
+     "tables_ignore":[],
+     "email":{
+         "send_mail":false,
+         "smtp_host":"smtp.163.com:25",
+         "from":"xxx@163.com",
+         "password":"xxx",
+         "to":"xxx@163.com"
+     }
+}
