@@ -1,0 +1,13 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        }
+    ]
+}

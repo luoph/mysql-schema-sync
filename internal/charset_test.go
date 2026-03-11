@@ -12,26 +12,37 @@ import (
 )
 
 func TestFieldInfo_CharsetCollationComparison(t *testing.T) {
-	// Test the exact scenario described in the issue
+	// nil charset/collation vs explicit charset/collation should be considered different
 	sourceField := &FieldInfo{
 		ColumnName:    "name",
 		ColumnType:    "varchar(64)",
 		IsNullAble:    "NO",
-		CharsetName:   nil, // No explicit charset
-		CollationName: nil, // No explicit collation
+		CharsetName:   nil,
+		CollationName: nil,
 	}
 
 	destField := &FieldInfo{
 		ColumnName:    "name",
 		ColumnType:    "varchar(64)",
 		IsNullAble:    "NO",
-		CharsetName:   stringPtr("utf8mb4"),            // Explicit charset
-		CollationName: stringPtr("utf8mb4_general_ci"), // Explicit collation
+		CharsetName:   stringPtr("utf8mb4"),
+		CollationName: stringPtr("utf8mb4_general_ci"),
 	}
 
-	// These should be considered equal
-	xt.True(t, sourceField.Equals(destField))
-	xt.True(t, destField.Equals(sourceField))
+	// nil vs non-nil should be different (strict comparison)
+	xt.False(t, sourceField.Equals(destField))
+	xt.False(t, destField.Equals(sourceField))
+
+	// Same explicit values should be equal
+	sourceField2 := &FieldInfo{
+		ColumnName:    "name",
+		ColumnType:    "varchar(64)",
+		IsNullAble:    "NO",
+		CharsetName:   stringPtr("utf8mb4"),
+		CollationName: stringPtr("utf8mb4_general_ci"),
+	}
+	xt.True(t, sourceField2.Equals(destField))
+	xt.True(t, destField.Equals(sourceField2))
 }
 
 func TestFieldInfo_DifferentCharsetCollation(t *testing.T) {
@@ -57,15 +68,69 @@ func TestFieldInfo_DifferentCharsetCollation(t *testing.T) {
 	xt.False(t, destField.Equals(sourceField))
 }
 
+func TestFieldInfo_ImplicitCharsetFromCollation(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+		columnType string
+		dataType   string
+		collation  string
+		charset    string
+	}{
+		{
+			name:       "enum",
+			columnName: "phase",
+			columnType: "enum('TRANSCRIPTION','ORGANIZING')",
+			dataType:   "enum",
+			collation:  "utf8mb4_general_ci",
+			charset:    "utf8mb4",
+		},
+		{
+			name:       "set",
+			columnName: "flags",
+			columnType: "set('red','green','blue')",
+			dataType:   "set",
+			collation:  "utf8mb4_general_ci",
+			charset:    "utf8mb4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceField := &FieldInfo{
+				ColumnName:    tt.columnName,
+				ColumnType:    tt.columnType,
+				DataType:      tt.dataType,
+				IsNullAble:    "NO",
+				CharsetName:   nil,
+				CollationName: stringPtr(tt.collation),
+			}
+
+			destField := &FieldInfo{
+				ColumnName:    tt.columnName,
+				ColumnType:    tt.columnType,
+				DataType:      tt.dataType,
+				IsNullAble:    "NO",
+				CharsetName:   stringPtr(tt.charset),
+				CollationName: stringPtr(tt.collation),
+			}
+
+			xt.True(t, sourceField.Equals(destField))
+			xt.True(t, destField.Equals(sourceField))
+		})
+	}
+}
+
 func TestFieldInfo_WithTimestamps(t *testing.T) {
-	// Test the exact example from the issue: t_shedlock table
+	// Timestamp fields: both sides have nil charset/collation (non-string type) → equal
+	// String fields: both sides should have same charset/collation from INFORMATION_SCHEMA
 	sourceFields := map[string]*FieldInfo{
 		"name": {
 			ColumnName:    "name",
 			ColumnType:    "varchar(64)",
 			IsNullAble:    "NO",
-			CharsetName:   nil,
-			CollationName: nil,
+			CharsetName:   stringPtr("utf8mb4"),
+			CollationName: stringPtr("utf8mb4_general_ci"),
 		},
 		"lock_until": {
 			ColumnName:    "lock_until",
@@ -89,8 +154,8 @@ func TestFieldInfo_WithTimestamps(t *testing.T) {
 			ColumnName:    "locked_by",
 			ColumnType:    "varchar(255)",
 			IsNullAble:    "NO",
-			CharsetName:   nil,
-			CollationName: nil,
+			CharsetName:   stringPtr("utf8mb4"),
+			CollationName: stringPtr("utf8mb4_general_ci"),
 		},
 	}
 
@@ -129,7 +194,7 @@ func TestFieldInfo_WithTimestamps(t *testing.T) {
 		},
 	}
 
-	// All fields should be considered equal
+	// All fields should be considered equal (same charset/collation on both sides)
 	for fieldName, sourceField := range sourceFields {
 		t.Run(fmt.Sprintf("field_%s", fieldName), func(t *testing.T) {
 			destField := destFields[fieldName]
@@ -140,60 +205,86 @@ func TestFieldInfo_WithTimestamps(t *testing.T) {
 }
 
 func TestFieldInfo_DefaultCharsets(t *testing.T) {
-	// Test that default charsets are handled correctly
+	// Strict charset/collation comparison tests
 	testCases := []struct {
-		name          string
-		charsetName   *string
-		collationName *string
-		shouldEqual   bool
+		name           string
+		charsetName1   *string
+		collationName1 *string
+		charsetName2   *string
+		collationName2 *string
+		shouldEqual    bool
 	}{
 		{
-			name:          "both nil",
-			charsetName:   nil,
-			collationName: nil,
-			shouldEqual:   true,
+			name:           "both nil - equal (non-string columns)",
+			charsetName1:   nil,
+			collationName1: nil,
+			charsetName2:   nil,
+			collationName2: nil,
+			shouldEqual:    true,
 		},
 		{
-			name:          "charset nil, collation nil vs utf8mb4",
-			charsetName:   nil,
-			collationName: nil,
-			shouldEqual:   true,
+			name:           "nil vs utf8mb4 - different",
+			charsetName1:   nil,
+			collationName1: nil,
+			charsetName2:   stringPtr("utf8mb4"),
+			collationName2: stringPtr("utf8mb4_general_ci"),
+			shouldEqual:    false,
 		},
 		{
-			name:          "charset nil vs utf8mb4, collation nil",
-			charsetName:   stringPtr("utf8mb4"),
-			collationName: nil,
-			shouldEqual:   true,
+			name:           "nil charset vs explicit charset only - different",
+			charsetName1:   nil,
+			collationName1: nil,
+			charsetName2:   stringPtr("utf8mb4"),
+			collationName2: nil,
+			shouldEqual:    false,
 		},
 		{
-			name:          "charset nil, collation nil vs general_ci",
-			charsetName:   nil,
-			collationName: stringPtr("utf8mb4_general_ci"),
-			shouldEqual:   true,
+			name:           "nil collation vs explicit collation only - different",
+			charsetName1:   nil,
+			collationName1: nil,
+			charsetName2:   nil,
+			collationName2: stringPtr("utf8mb4_general_ci"),
+			shouldEqual:    false,
 		},
 		{
-			name:          "both utf8mb4 general_ci",
-			charsetName:   stringPtr("utf8mb4"),
-			collationName: stringPtr("utf8mb4_general_ci"),
-			shouldEqual:   true,
+			name:           "same utf8mb4 general_ci - equal",
+			charsetName1:   stringPtr("utf8mb4"),
+			collationName1: stringPtr("utf8mb4_general_ci"),
+			charsetName2:   stringPtr("utf8mb4"),
+			collationName2: stringPtr("utf8mb4_general_ci"),
+			shouldEqual:    true,
 		},
 		{
-			name:          "both utf8 general_ci",
-			charsetName:   stringPtr("utf8"),
-			collationName: stringPtr("utf8_general_ci"),
-			shouldEqual:   true,
+			name:           "same utf8 general_ci - equal",
+			charsetName1:   stringPtr("utf8"),
+			collationName1: stringPtr("utf8_general_ci"),
+			charsetName2:   stringPtr("utf8"),
+			collationName2: stringPtr("utf8_general_ci"),
+			shouldEqual:    true,
 		},
 		{
-			name:          "both latin1 swedish_ci",
-			charsetName:   stringPtr("latin1"),
-			collationName: stringPtr("latin1_swedish_ci"),
-			shouldEqual:   true,
+			name:           "same latin1 swedish_ci - equal",
+			charsetName1:   stringPtr("latin1"),
+			collationName1: stringPtr("latin1_swedish_ci"),
+			charsetName2:   stringPtr("latin1"),
+			collationName2: stringPtr("latin1_swedish_ci"),
+			shouldEqual:    true,
 		},
 		{
-			name:          "different charset: ascii vs utf8mb4",
-			charsetName:   stringPtr("ascii"),
-			collationName: stringPtr("ascii_general_ci"),
-			shouldEqual:   false,
+			name:           "different charset: ascii vs utf8mb4 - different",
+			charsetName1:   stringPtr("ascii"),
+			collationName1: stringPtr("ascii_general_ci"),
+			charsetName2:   stringPtr("utf8mb4"),
+			collationName2: stringPtr("utf8mb4_general_ci"),
+			shouldEqual:    false,
+		},
+		{
+			name:           "same charset different collation - different",
+			charsetName1:   stringPtr("utf8mb4"),
+			collationName1: stringPtr("utf8mb4_general_ci"),
+			charsetName2:   stringPtr("utf8mb4"),
+			collationName2: stringPtr("utf8mb4_unicode_ci"),
+			shouldEqual:    false,
 		},
 	}
 
@@ -203,16 +294,16 @@ func TestFieldInfo_DefaultCharsets(t *testing.T) {
 				ColumnName:    "test_field",
 				ColumnType:    "varchar(100)",
 				IsNullAble:    "NO",
-				CharsetName:   nil,
-				CollationName: nil,
+				CharsetName:   tc.charsetName1,
+				CollationName: tc.collationName1,
 			}
 
 			field2 := &FieldInfo{
 				ColumnName:    "test_field",
 				ColumnType:    "varchar(100)",
 				IsNullAble:    "NO",
-				CharsetName:   tc.charsetName,
-				CollationName: tc.collationName,
+				CharsetName:   tc.charsetName2,
+				CollationName: tc.collationName2,
 			}
 
 			if tc.shouldEqual {

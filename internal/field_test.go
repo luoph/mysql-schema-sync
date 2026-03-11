@@ -36,7 +36,7 @@ func TestFieldInfo_Equals(t *testing.T) {
 			equal: true,
 		},
 		{
-			name: "same field with and without explicit charset/collation",
+			name: "nil vs explicit charset/collation should differ",
 			field1: &FieldInfo{
 				ColumnName:    "name",
 				ColumnType:    "varchar(64)",
@@ -51,16 +51,16 @@ func TestFieldInfo_Equals(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb4"),
 				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
-			equal: true,
+			equal: false,
 		},
 		{
-			name: "same field with different charset",
+			name: "same explicit charset/collation should be equal",
 			field1: &FieldInfo{
 				ColumnName:    "name",
 				ColumnType:    "varchar(64)",
 				IsNullAble:    "NO",
-				CharsetName:   nil,
-				CollationName: nil,
+				CharsetName:   stringPtr("utf8mb4"),
+				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
 			field2: &FieldInfo{
 				ColumnName:    "name",
@@ -108,13 +108,13 @@ func TestFieldInfo_Equals(t *testing.T) {
 			equal: false,
 		},
 		{
-			name: "same field with default collation",
+			name: "different collation should differ",
 			field1: &FieldInfo{
 				ColumnName:    "name",
 				ColumnType:    "varchar(64)",
 				IsNullAble:    "NO",
-				CharsetName:   nil,
-				CollationName: nil,
+				CharsetName:   stringPtr("utf8mb4"),
+				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
 			field2: &FieldInfo{
 				ColumnName:    "name",
@@ -123,7 +123,7 @@ func TestFieldInfo_Equals(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb4"),
 				CollationName: stringPtr("utf8mb4_unicode_ci"),
 			},
-			equal: true,
+			equal: false,
 		},
 		// Integer type display width tests (MySQL 5.7 vs 8.0 compatibility)
 		{
@@ -312,7 +312,7 @@ func TestFieldInfo_String(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb4"),
 				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
-			want: "`name` varchar(64) NOT NULL",
+			want: "`name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
 		},
 		{
 			name: "field with default value",
@@ -338,7 +338,7 @@ func TestFieldInfo_String(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb3"),
 				CollationName: stringPtr("utf8mb3_general_ci"),
 			},
-			want: "`f_status` varchar(32) NOT NULL DEFAULT 'queue'",
+			want: "`f_status` varchar(32) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NOT NULL DEFAULT 'queue'",
 		},
 		{
 			name: "char field with string default value",
@@ -362,7 +362,7 @@ func TestFieldInfo_String(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb4"),
 				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
-			want: "`description` text NULL DEFAULT 'default text'",
+			want: "`description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT 'default text'",
 		},
 		{
 			name: "int field with numeric default value",
@@ -385,7 +385,7 @@ func TestFieldInfo_String(t *testing.T) {
 				CharsetName:   stringPtr("utf8mb4"),
 				CollationName: stringPtr("utf8mb4_general_ci"),
 			},
-			want: "`description` text NULL",
+			want: "`description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL",
 		},
 		{
 			name: "timestamp with auto update",

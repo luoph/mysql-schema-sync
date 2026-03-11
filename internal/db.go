@@ -49,6 +49,14 @@ func (f *FieldInfo) String() string {
 	// Column name and type
 	parts = append(parts, fmt.Sprintf("`%s` %s", f.ColumnName, f.ColumnType))
 
+	// CHARACTER SET and COLLATION (only for string types where these are non-nil)
+	if f.CharsetName != nil {
+		parts = append(parts, fmt.Sprintf("CHARACTER SET %s", *f.CharsetName))
+	}
+	if f.CollationName != nil {
+		parts = append(parts, fmt.Sprintf("COLLATE %s", *f.CollationName))
+	}
+
 	// NULL/NOT NULL
 	if strings.ToUpper(f.IsNullAble) == "NO" {
 		parts = append(parts, "NOT NULL")
@@ -130,38 +138,64 @@ func (f *FieldInfo) Equals(other *FieldInfo) bool {
 	return true
 }
 
-// charsetEquals checks if character sets are semantically equal
+// charsetEquals checks if character sets are semantically equal.
+// Most string columns report a non-nil charset in INFORMATION_SCHEMA, but
+// enum/set may only expose collation on some MySQL-compatible backends.
 func (f *FieldInfo) charsetEquals(other *FieldInfo) bool {
 	if f.CharsetName == nil && other.CharsetName == nil {
 		return true
 	}
 	if (f.CharsetName == nil) != (other.CharsetName == nil) {
-		if f.CharsetName != nil {
-			return *f.CharsetName == "utf8mb4" || *f.CharsetName == "utf8" || *f.CharsetName == "latin1"
+		if !f.hasImplicitCharsetFromCollation() {
+			return false
 		}
-		return *other.CharsetName == "utf8mb4" || *other.CharsetName == "utf8" || *other.CharsetName == "latin1"
+		inferredCharset, ok := inferCharsetFromCollation(f.CollationName, other.CollationName)
+		if !ok {
+			return false
+		}
+		if f.CharsetName != nil {
+			return strings.EqualFold(*f.CharsetName, inferredCharset)
+		}
+		return strings.EqualFold(*other.CharsetName, inferredCharset)
 	}
 	return *f.CharsetName == *other.CharsetName
 }
 
-// collationEquals checks if collations are semantically equal
+// collationEquals checks if collations are semantically equal.
+// In MySQL INFORMATION_SCHEMA, string columns always have non-nil collation,
+// non-string columns always have nil collation. nil vs non-nil means different types.
 func (f *FieldInfo) collationEquals(other *FieldInfo) bool {
 	if f.CollationName == nil && other.CollationName == nil {
 		return true
 	}
 	if (f.CollationName == nil) != (other.CollationName == nil) {
-		if f.CollationName != nil {
-			return *f.CollationName == "utf8mb4_general_ci" ||
-				*f.CollationName == "utf8mb4_unicode_ci" ||
-				*f.CollationName == "utf8_general_ci" ||
-				*f.CollationName == "latin1_swedish_ci"
-		}
-		return *other.CollationName == "utf8mb4_general_ci" ||
-			*other.CollationName == "utf8mb4_unicode_ci" ||
-			*other.CollationName == "utf8_general_ci" ||
-			*other.CollationName == "latin1_swedish_ci"
+		return false
 	}
 	return *f.CollationName == *other.CollationName
+}
+
+func (f *FieldInfo) hasImplicitCharsetFromCollation() bool {
+	switch strings.ToLower(f.DataType) {
+	case "enum", "set":
+		return true
+	default:
+		return false
+	}
+}
+
+func inferCharsetFromCollation(collations ...*string) (string, bool) {
+	for _, collation := range collations {
+		if collation == nil || *collation == "" {
+			continue
+		}
+		name := strings.ToLower(*collation)
+		index := strings.Index(name, "_")
+		if index <= 0 {
+			continue
+		}
+		return name[:index], true
+	}
+	return "", false
 }
 
 type dbType string

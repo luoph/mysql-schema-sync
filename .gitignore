@@ -25,6 +25,9 @@ _testmain.go
 .DS_Store
 log/
 .idea/
+target/
+dist/
+output/
 db-schema-sync
 vendor
 mydb_conf.json
