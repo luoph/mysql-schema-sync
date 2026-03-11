@@ -84,6 +84,14 @@ func errString(err error) string {
 	return xcolor.RedString("%s", err.Error())
 }
 
+// normalizeColumnDDL normalizes a column DDL line by removing known false-positive differences.
+// Currently normalizes integer display width: int(11) → int, bigint(20) → bigint, etc.
+// This is used to detect real text differences that FieldsEqual might miss.
+func normalizeColumnDDL(ddl string) string {
+	re := regexp.MustCompile(`(?i)(tinyint|smallint|mediumint|int|bigint)\(\d+\)`)
+	return re.ReplaceAllString(ddl, "$1")
+}
+
 // normalizeIntegerType removes display width from integer types for MySQL 8.0.19+ compatibility.
 // MySQL 8.0.19+ deprecated display width for integer types (TINYINT, SMALLINT, MEDIUMINT, INT, BIGINT).
 // This function normalizes types like "int(11)" to "int" while preserving modifiers like "unsigned" and "zerofill".

@@ -4,6 +4,48 @@ import (
 	"testing"
 )
 
+func TestNormalizeColumnDDL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "varchar with charset - no change",
+			input:    "`name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+			expected: "`name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+		},
+		{
+			name:     "int(11) in DDL - normalized",
+			input:    "`count` int(11) NOT NULL DEFAULT '0'",
+			expected: "`count` int NOT NULL DEFAULT '0'",
+		},
+		{
+			name:     "bigint(20) in DDL - normalized",
+			input:    "`id` bigint(20) NOT NULL AUTO_INCREMENT",
+			expected: "`id` bigint NOT NULL AUTO_INCREMENT",
+		},
+		{
+			name:     "tinyint(1) in DDL - normalized",
+			input:    "`deleted` tinyint(1) NOT NULL DEFAULT '0'",
+			expected: "`deleted` tinyint NOT NULL DEFAULT '0'",
+		},
+		{
+			name:     "text type - no change",
+			input:    "`content` text COLLATE utf8mb4_unicode_ci NOT NULL",
+			expected: "`content` text COLLATE utf8mb4_unicode_ci NOT NULL",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeColumnDDL(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeColumnDDL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNormalizeIntegerType(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -183,7 +183,18 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				} else {
 					if sourceFieldInfo != nil && destFieldInfo != nil {
 						if d.FieldsEqual(sourceFieldInfo, destFieldInfo) {
-							if d.SupportsColumnOrder() && sc.Config.FieldOrder && sourceFieldInfo.OrdinalPosition != destFieldInfo.OrdinalPosition {
+							// FieldsEqual 认为语义相等，进一步检查归一化后的 DDL 文本是否仍有差异
+							// 例如: 显式 CHARACTER SET vs 隐式继承表默认字符集
+							normalizedValue := normalizeColumnDDL(value)
+							normalizedDestValue := normalizeColumnDDL(destValue)
+							if normalizedValue != normalizedDestValue {
+								// 归一化后文本仍然不同，存在真实的 DDL 差异（如字符集表示不同）
+								alterSQL := d.GenChangeColumnText(fieldName, value)
+								if alterSQL != "" {
+									newClauses = append(newClauses, alterSQL)
+								}
+								log.Printf("[Debug] field %s.%s: semantically equal but DDL text differs after normalization, generating CHANGE", table, fieldName)
+							} else if d.SupportsColumnOrder() && sc.Config.FieldOrder && sourceFieldInfo.OrdinalPosition != destFieldInfo.OrdinalPosition {
 								alterSQL := fmt.Sprintf("MODIFY COLUMN %s", d.FieldDef(sourceFieldInfo))
 								if len(beforeFieldName) > 0 {
 									alterSQL += fmt.Sprintf(" AFTER %s", d.Quote(beforeFieldName))
@@ -193,13 +204,19 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 								newClauses = append(newClauses, alterSQL)
 								log.Printf("[Debug] field %s.%s: semantically equal but order differs, generating MODIFY", table, fieldName)
 							} else {
-								log.Printf("[Debug] field %s.%s: text differs but semantically equal, skipping", table, fieldName)
+								log.Printf("[Debug] field %s.%s: text differs but semantically equal (integer display width only), skipping", table, fieldName)
 								beforeFieldName = fieldName
 								fieldCount++
 								continue
 							}
 						} else {
-							newClauses = append(newClauses, d.GenChangeColumn(fieldName, sourceFieldInfo, destFieldInfo)...)
+							// 优先使用源 DDL 文本生成 CHANGE，保留 SHOW CREATE TABLE 的原始表示
+							// 如果 GenChangeColumnText 返回空（如 PostgreSQL），退回使用结构化生成
+							if alterSQL := d.GenChangeColumnText(fieldName, value); alterSQL != "" {
+								newClauses = append(newClauses, alterSQL)
+							} else {
+								newClauses = append(newClauses, d.GenChangeColumn(fieldName, sourceFieldInfo, destFieldInfo)...)
+							}
 							log.Printf("[Debug] field %s.%s: confirmed difference via structured comparison", table, fieldName)
 						}
 					} else {
