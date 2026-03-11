@@ -2,10 +2,60 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build",
+            "label": "build: all",
             "type": "shell",
             "command": "./build.sh",
             "args": [],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        },
+        {
+            "label": "build: linux/amd64",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [
+                "linux/amd64"
+            ],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        },
+        {
+            "label": "build: linux/arm64",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [
+                "linux/arm64"
+            ],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        },
+        {
+            "label": "build: darwin/amd64",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [
+                "darwin/amd64"
+            ],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        },
+        {
+            "label": "build: darwin/arm64",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [
+                "darwin/arm64"
+            ],
+            "problemMatcher": [],
+            "detail": "执行 build.sh 进行跨平台编译打包"
+        },
+        {
+            "label": "build: windows/amd64",
+            "type": "shell",
+            "command": "./build.sh",
+            "args": [
+                "windows/amd64"
+            ],
             "problemMatcher": [],
             "detail": "执行 build.sh 进行跨平台编译打包"
         }

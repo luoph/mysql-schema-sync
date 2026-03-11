@@ -33,15 +33,25 @@ go install github.com/luoph/mysql-schema-sync@master
 项目提供了一个 `build.sh` 脚本，用于快速交叉编译并生成多平台的压缩包。
 
 ```bash
-# 执行打包脚本
+# 打包所有平台（默认）
 bash build.sh
+
+# 打包指定单个平台
+bash build.sh linux/amd64
+
+# 打包指定多个平台（半角逗号分隔）
+bash build.sh linux/amd64,darwin/arm64
 ```
 
-运行后，打包结果将生成在 `target/dist/` 目录下，包含以下平台的压缩包：
+支持的平台/架构：
 
-- Linux (amd64, arm64)
-- Darwin (amd64, arm64)
-- Windows (amd64)
+- `linux/amd64`
+- `linux/arm64`
+- `darwin/amd64`
+- `darwin/arm64`
+- `windows/amd64`
+
+运行后，打包结果将生成在 `target/dist/` 目录下。
 
 每个压缩包内均包含：
 

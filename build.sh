@@ -5,12 +5,36 @@ PROJECT_NAME="db-schema-sync"
 TARGET_DIR="target"
 DIST_DIR="${TARGET_DIR}/dist"
 
+# 所有支持的平台/架构
+ALL_PLATFORMS=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64")
+
+# 解析参数：支持逗号分隔的平台列表，如 linux/amd64,darwin/arm64
+if [ -n "$1" ]; then
+    IFS=',' read -ra PLATFORMS <<< "$1"
+    # 校验平台参数是否合法
+    for p in "${PLATFORMS[@]}"; do
+        valid=false
+        for ap in "${ALL_PLATFORMS[@]}"; do
+            if [ "$p" = "$ap" ]; then
+                valid=true
+                break
+            fi
+        done
+        if [ "$valid" = false ]; then
+            echo "Error: unsupported platform '${p}'"
+            echo "Supported platforms: ${ALL_PLATFORMS[*]}"
+            exit 1
+        fi
+    done
+else
+    PLATFORMS=("${ALL_PLATFORMS[@]}")
+fi
+
+echo "Platforms to build: ${PLATFORMS[*]}"
+
 # 清理并创建目录
 rm -rf "${TARGET_DIR}"
 mkdir -p "${DIST_DIR}"
-
-# 编译平台列表
-PLATFORMS=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64")
 
 for PLATFORM in "${PLATFORMS[@]}"; do
     OS=${PLATFORM%/*}
