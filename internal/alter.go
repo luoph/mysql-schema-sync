@@ -54,23 +54,16 @@ func (ta *TableAlterData) Split() []*TableAlterData {
 }
 
 func (ta *TableAlterData) String() string {
-	relationTables := ta.SchemaDiff.RelationTables()
-	sqlTpl := `
--- Table : %s
--- Type : %s
--- RelationTables :%s
--- Comment :%s
--- SQL :
-%s
-`
-	str := fmt.Sprintf(sqlTpl,
-		ta.Table,
-		ta.Type,
-		strings.Join(relationTables, ","),
-		strings.TrimSpace(ta.Comment),
-		strings.Join(ta.SQL, "\n"),
-	)
-	return strings.TrimSpace(str)
+	var lines []string
+	lines = append(lines, fmt.Sprintf("-- Table : %s", ta.Table))
+	lines = append(lines, fmt.Sprintf("-- Type : %s", ta.Type))
+	if comment := strings.TrimSpace(ta.Comment); comment != "" {
+		lines = append(lines, fmt.Sprintf("-- Comment: %s", comment))
+	}
+	if len(ta.SQL) > 0 {
+		lines = append(lines, strings.Join(ta.SQL, "\n"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 var autoIncrReg = regexp.MustCompile(`\sAUTO_INCREMENT=[1-9]\d*\s`)
