@@ -599,10 +599,64 @@ func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop b
 	case indexTypePrimary, indexTypeUnique, checkConstraint:
 		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	case indexTypeIndex:
-		sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
+		// 对于 IndexEnumerator 返回的普通索引，idx.SQL 已是完整 CREATE INDEX ... 语句
+		// （支持 USING btree/gin/hnsw/…，以及 WHERE 条件和表达式索引），原样使用即可；
+		// 旧路径下 defSQL 只是列表达式，则按 btree 拼接兼容。
+		upperDef := strings.ToUpper(strings.TrimSpace(defSQL))
+		if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
+			sqls = append(sqls, ensureSemicolon(defSQL))
+		} else {
+			sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
+		}
 	}
 
 	return sqls
+}
+
+func ensureSemicolon(sql string) string {
+	s := strings.TrimSpace(sql)
+	if !strings.HasSuffix(s, ";") {
+		s += ";"
+	}
+	return s
+}
+
+// GetTableIndexes implements IndexEnumerator: 枚举非约束索引（通过 pg_constraint.conindid
+// 排除由 PK/UNIQUE/EXCLUDE 约束占用的物理索引），返回带完整 CREATE INDEX DDL 的 DbIndex 列表。
+func (p *PostgresDialect) GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error) {
+	const q = `
+		SELECT ic.relname AS indexname,
+		       pg_get_indexdef(ic.oid) AS indexdef
+		FROM pg_class ic
+		JOIN pg_index i ON ic.oid = i.indexrelid
+		JOIN pg_class t ON i.indrelid = t.oid
+		JOIN pg_namespace n ON t.relnamespace = n.oid
+		LEFT JOIN pg_constraint con ON con.conindid = ic.oid
+		WHERE n.nspname = 'public'
+		  AND t.relname = $1
+		  AND ic.relkind = 'i'
+		  AND con.oid IS NULL
+		ORDER BY ic.relname`
+	rows, err := db.Query(q, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("pg get indexes for %q: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	var result []*DbIndex
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return nil, err
+		}
+		result = append(result, &DbIndex{
+			IndexType:      indexTypeIndex,
+			Name:           name,
+			SQL:            def,
+			RelationTables: []string{},
+		})
+	}
+	return result, rows.Err()
 }
 
 func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {

@@ -104,6 +104,12 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 		}
 	}
 
+	// 合并"非 constraint 支撑"索引（PG 普通/GIN/HNSW/partial/表达式索引）。
+	// 这些索引不会出现在 ParseSchema 从 CREATE TABLE 字符串解析的 IndexAll 里，
+	// 需要直接查数据库元信息补齐。MySQL 等 dialect 未实现 IndexEnumerator 时此调用为 no-op。
+	sc.mergeExtraIndexes(alter.SchemaDiff.Source, sc.SourceDb, table)
+	sc.mergeExtraIndexes(alter.SchemaDiff.Dest, sc.DestDb, table)
+
 	if sSchema == dSchema {
 		return alter
 	}
@@ -117,6 +123,15 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 		alter.Type = alterTypeCreate
 		alter.Comment = "目标数据库不存在，创建"
 		alter.SQL = append(alter.SQL, d.GenCreateTable(sSchema))
+		for _, idx := range alter.SchemaDiff.Source.IndexAll {
+			if idx.IndexType != indexTypeIndex {
+				continue
+			}
+			upperDef := strings.ToUpper(strings.TrimSpace(idx.SQL))
+			if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
+				alter.SQL = append(alter.SQL, strings.TrimRight(idx.SQL, ";")+";")
+			}
+		}
 		return alter
 	}
 
@@ -382,6 +397,29 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 	}
 
 	return alterClauses, standaloneSQL
+}
+
+// mergeExtraIndexes 把通过 IndexEnumerator 枚举到的非约束索引合并进 MySchema.IndexAll。
+// 若 IndexAll 中已经存在同名条目（由 ParseSchema 从 CREATE TABLE 字符串解析得到的 PK/UNIQUE），
+// 以已有为准，不覆盖。
+func (sc *SchemaSync) mergeExtraIndexes(mys *MySchema, db *MyDb, table string) {
+	if mys == nil || db == nil {
+		return
+	}
+	indexes, err := db.TableIndexesExtra(table)
+	if err != nil {
+		log.Printf("[Debug] enumerate extra indexes for %q failed: %s", table, errString(err))
+		return
+	}
+	if mys.IndexAll == nil {
+		mys.IndexAll = make(map[string]*DbIndex)
+	}
+	for _, idx := range indexes {
+		if _, has := mys.IndexAll[idx.Name]; has {
+			continue
+		}
+		mys.IndexAll[idx.Name] = idx
+	}
 }
 
 // classifySQL separates standalone SQL from ALTER TABLE clauses

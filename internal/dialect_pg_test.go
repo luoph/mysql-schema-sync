@@ -255,6 +255,59 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		xt.Equal(t, `DROP CONSTRAINT "pk_test"`, sqls[0])
 		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
 	})
+
+	t.Run("add btree index with full CREATE INDEX def", func(t *testing.T) {
+		idx := &DbIndex{
+			IndexType: indexTypeIndex,
+			Name:      "idx_user_id",
+			SQL:       `CREATE INDEX idx_user_id ON public.user_agent_file USING btree (user_id)`,
+		}
+		sqls := d.GenAddIndex("user_agent_file", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX idx_user_id ON public.user_agent_file USING btree (user_id);`, sqls[0])
+	})
+
+	t.Run("add hnsw index with full def", func(t *testing.T) {
+		idx := &DbIndex{
+			IndexType: indexTypeIndex,
+			Name:      "idx_hnsw",
+			SQL:       `CREATE INDEX idx_hnsw ON public.note_embedding USING hnsw (embedding vector_cosine_ops)`,
+		}
+		sqls := d.GenAddIndex("note_embedding", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX idx_hnsw ON public.note_embedding USING hnsw (embedding vector_cosine_ops);`, sqls[0])
+	})
+
+	t.Run("add partial index with WHERE clause", func(t *testing.T) {
+		idx := &DbIndex{
+			IndexType: indexTypeIndex,
+			Name:      "idx_active",
+			SQL:       `CREATE INDEX idx_active ON public.t USING btree (user_id) WHERE (is_deleted = false)`,
+		}
+		sqls := d.GenAddIndex("t", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX idx_active ON public.t USING btree (user_id) WHERE (is_deleted = false);`, sqls[0])
+	})
+
+	t.Run("full def index with drop first", func(t *testing.T) {
+		idx := &DbIndex{
+			IndexType: indexTypeIndex,
+			Name:      "idx_user_id",
+			SQL:       `CREATE INDEX idx_user_id ON public.t USING btree (user_id)`,
+		}
+		sqls := d.GenAddIndex("t", idx, true)
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP INDEX "idx_user_id";`, sqls[0])
+		xt.Equal(t, `CREATE INDEX idx_user_id ON public.t USING btree (user_id);`, sqls[1])
+	})
+
+	t.Run("legacy expression-only index def falls back to btree wrap", func(t *testing.T) {
+		// 旧路径兼容：SQL 字段不是完整 CREATE INDEX 语句时仍用 btree 包装
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_a", SQL: `"a", "b"`}
+		sqls := d.GenAddIndex("t", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX "idx_a" ON "t" USING btree ("a", "b");`, sqls[0])
+	})
 }
 
 func TestPostgresDialect_GenForeignKey(t *testing.T) {

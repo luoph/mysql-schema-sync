@@ -256,6 +256,44 @@ func (db *MyDb) TableFieldsFromInformationSchema(tableName string) (map[string]*
 	return db.dialect.GetTableFields(db.sqlDB, db.dbName, tableName)
 }
 
+// TableIndexesExtra 通过 dialect 可选能力 IndexEnumerator 枚举"非 constraint 支撑"的索引。
+// 若 dialect 未实现该能力或 sqlDB 不可用（例如纯文本对比测试），返回 (nil, nil)。
+func (db *MyDb) TableIndexesExtra(tableName string) ([]*DbIndex, error) {
+	if db == nil || db.sqlDB == nil || db.dialect == nil {
+		return nil, nil
+	}
+	ie, ok := db.dialect.(IndexEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	return ie.GetTableIndexes(db.sqlDB, tableName)
+}
+
+// TableTriggers 通过 dialect 可选能力 TriggerEnumerator 枚举表上的用户触发器。
+// 若 dialect 未实现该能力或 sqlDB 不可用，返回 (nil, nil)。
+func (db *MyDb) TableTriggers(tableName string) ([]*DbTrigger, error) {
+	if db == nil || db.sqlDB == nil || db.dialect == nil {
+		return nil, nil
+	}
+	te, ok := db.dialect.(TriggerEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	return te.GetTableTriggers(db.sqlDB, tableName)
+}
+
+// Functions 通过 dialect 可选能力 FunctionEnumerator 枚举库内用户自定义函数。
+func (db *MyDb) Functions() ([]*DbFunction, error) {
+	if db == nil || db.sqlDB == nil || db.dialect == nil {
+		return nil, nil
+	}
+	fe, ok := db.dialect.(FunctionEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	return fe.GetFunctions(db.sqlDB)
+}
+
 // Query execute sql query
 func (db *MyDb) Query(query string, args ...any) (rows *sql.Rows, err error) {
 	txt := fmt.Sprintf("[%-6s: %s] [Query] Start SQL=%s Args=%s\n",
