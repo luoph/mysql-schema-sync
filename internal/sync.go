@@ -132,6 +132,7 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 		alter.Type = alterTypeCreate
 		alter.Comment = "目标数据库不存在，创建"
 		alter.SQL = append(alter.SQL, d.GenCreateTable(sSchema))
+		idxCommenter, _ := d.(IndexCommenter)
 		for _, idx := range alter.SchemaDiff.Source.IndexAll {
 			if idx.IndexType != indexTypeIndex {
 				continue
@@ -139,6 +140,9 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 			upperDef := strings.ToUpper(strings.TrimSpace(idx.SQL))
 			if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
 				alter.SQL = append(alter.SQL, strings.TrimRight(idx.SQL, ";")+";")
+				if idxCommenter != nil && idx.Comment != "" {
+					alter.SQL = append(alter.SQL, idxCommenter.GenCommentIndexSQL(idx.Name, idx.Comment))
+				}
 			}
 		}
 		if te, ok := d.(TriggerEnumerator); ok {
@@ -339,6 +343,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 	}
 
 	// 比对索引
+	idxCommenter, _ := d.(IndexCommenter)
 	for indexName, idx := range sourceMyS.IndexAll {
 		if sc.Config.IsIgnoreIndex(table, indexName) {
 			log.Printf("ignore index %s.%s", table, indexName)
@@ -348,12 +353,24 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 		log.Println("[Debug] indexName---->[", fmt.Sprintf("%s.%s", table, indexName),
 			"] dest_has:", has, "\ndest_idx:", dIdx, "\nsource_idx:", idx)
 		var indexSQLs []string
+		sqlChanged := has && idx.SQL != dIdx.SQL
 		if has {
-			if idx.SQL != dIdx.SQL {
+			if sqlChanged {
 				indexSQLs = d.GenAddIndex(table, idx, true)
 			}
 		} else {
 			indexSQLs = d.GenAddIndex(table, idx, false)
+		}
+		// COMMENT ON INDEX：只要源索引有注释就随建索引一同 emit；
+		// SQL 相同但注释变化时单独 emit，避免无谓的索引重建。
+		if idxCommenter != nil {
+			if !has || sqlChanged {
+				if idx.Comment != "" {
+					indexSQLs = append(indexSQLs, idxCommenter.GenCommentIndexSQL(indexName, idx.Comment))
+				}
+			} else if has && idx.Comment != dIdx.Comment {
+				indexSQLs = append(indexSQLs, idxCommenter.GenCommentIndexSQL(indexName, idx.Comment))
+			}
 		}
 		if len(indexSQLs) > 0 {
 			classifySQL(indexSQLs, &alterClauses, &standaloneSQL)

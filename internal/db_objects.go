@@ -13,6 +13,13 @@ type IndexEnumerator interface {
 	GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error)
 }
 
+// IndexCommenter 是 Dialect 的可选能力：为索引生成 COMMENT ON INDEX DDL。
+// 仅当一侧索引 Comment 与另一侧不同、而 SQL 相同时，会单独 emit 该语句以避免
+// 不必要的索引重建。MySQL 的索引注释嵌在 CREATE TABLE 里，不需要实现。
+type IndexCommenter interface {
+	GenCommentIndexSQL(indexName, comment string) string
+}
+
 // TableCommentEnumerator 是 Dialect 的可选能力：读取与生成表级注释 DDL。
 // MySQL 的表注释原本就嵌在 CREATE TABLE 的 COMMENT= 子句里，不需要独立处理，
 // 因此只有 PostgreSQL 需要实现这个能力。

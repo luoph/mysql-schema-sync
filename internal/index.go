@@ -14,6 +14,11 @@ type DbIndex struct {
 	Name      string
 	SQL       string
 
+	// Comment 用于 PostgreSQL 的 COMMENT ON INDEX；仅在通过 IndexEnumerator
+	// 枚举得到的普通索引中有意义（MySQL 的索引注释嵌在 SHOW CREATE TABLE 里，
+	// 会随 SQL 文本一同比较，不需要独立字段）。
+	Comment string
+
 	// 相关联的表
 	RelationTables []string
 }

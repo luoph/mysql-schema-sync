@@ -741,15 +741,18 @@ func (p *PostgresDialect) GenAddFunction(fn *DbFunction) string {
 
 // GetTableIndexes implements IndexEnumerator: 枚举非约束索引（通过 pg_constraint.conindid
 // 排除由 PK/UNIQUE/EXCLUDE 约束占用的物理索引），返回带完整 CREATE INDEX DDL 的 DbIndex 列表。
+// 同时一并读取索引级 COMMENT（pg_description.objsubid=0），保存到 DbIndex.Comment。
 func (p *PostgresDialect) GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error) {
 	const q = `
 		SELECT ic.relname AS indexname,
-		       pg_get_indexdef(ic.oid) AS indexdef
+		       pg_get_indexdef(ic.oid) AS indexdef,
+		       COALESCE(d.description, '') AS indexcomment
 		FROM pg_class ic
 		JOIN pg_index i ON ic.oid = i.indexrelid
 		JOIN pg_class t ON i.indrelid = t.oid
 		JOIN pg_namespace n ON t.relnamespace = n.oid
 		LEFT JOIN pg_constraint con ON con.conindid = ic.oid
+		LEFT JOIN pg_description d ON d.objoid = ic.oid AND d.objsubid = 0
 		WHERE n.nspname = 'public'
 		  AND t.relname = $1
 		  AND ic.relkind = 'i'
@@ -763,18 +766,28 @@ func (p *PostgresDialect) GetTableIndexes(db *sql.DB, tableName string) ([]*DbIn
 
 	var result []*DbIndex
 	for rows.Next() {
-		var name, def string
-		if err := rows.Scan(&name, &def); err != nil {
+		var name, def, comment string
+		if err := rows.Scan(&name, &def, &comment); err != nil {
 			return nil, err
 		}
 		result = append(result, &DbIndex{
 			IndexType:      indexTypeIndex,
 			Name:           name,
 			SQL:            def,
+			Comment:        comment,
 			RelationTables: []string{},
 		})
 	}
 	return result, rows.Err()
+}
+
+// GenCommentIndexSQL 生成 COMMENT ON INDEX 语句；空字符串时清除注释。
+func (p *PostgresDialect) GenCommentIndexSQL(indexName, comment string) string {
+	if comment == "" {
+		return fmt.Sprintf(`COMMENT ON INDEX %q IS NULL;`, indexName)
+	}
+	escaped := strings.ReplaceAll(comment, "'", "''")
+	return fmt.Sprintf(`COMMENT ON INDEX %q IS '%s';`, indexName, escaped)
 }
 
 func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {

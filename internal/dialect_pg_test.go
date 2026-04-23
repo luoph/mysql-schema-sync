@@ -479,6 +479,23 @@ func TestPostgresDialect_WrapAlterSQL(t *testing.T) {
 	})
 }
 
+func TestPostgresDialect_GenCommentIndexSQL(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("set", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON INDEX "idx_a" IS 'hot path';`,
+			d.GenCommentIndexSQL("idx_a", "hot path"))
+	})
+	t.Run("clear", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON INDEX "idx_a" IS NULL;`,
+			d.GenCommentIndexSQL("idx_a", ""))
+	})
+	t.Run("escape quote", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON INDEX "idx_a" IS 'it''s';`,
+			d.GenCommentIndexSQL("idx_a", "it's"))
+	})
+}
+
 func TestPostgresDialect_GenCommentTableSQL(t *testing.T) {
 	d := &PostgresDialect{}
 
