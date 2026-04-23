@@ -665,6 +665,54 @@ func (p *PostgresDialect) GenAddTrigger(trg *DbTrigger) string {
 	return ensureSemicolon(trg.Definition)
 }
 
+// GetFunctions implements FunctionEnumerator: 枚举 public schema 下的用户自定义函数。
+// 通过 pg_depend deptype='e' 排除属于 extension 的函数（pgvector、pgcrypto 等），
+// Definition 直接使用 pg_get_functiondef 输出的 CREATE OR REPLACE FUNCTION 语句。
+func (p *PostgresDialect) GetFunctions(db *sql.DB) ([]*DbFunction, error) {
+	const q = `
+		SELECT p.proname,
+		       pg_get_function_identity_arguments(p.oid) AS args,
+		       pg_get_functiondef(p.oid) AS def
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		WHERE n.nspname = 'public'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM pg_depend d
+		    WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+		  )
+		  AND p.prokind = 'f'
+		ORDER BY p.proname, args`
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("pg get functions: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*DbFunction
+	for rows.Next() {
+		var name, args, def string
+		if err := rows.Scan(&name, &args, &def); err != nil {
+			return nil, err
+		}
+		result = append(result, &DbFunction{
+			Name:       name,
+			Signature:  args,
+			Definition: def,
+		})
+	}
+	return result, rows.Err()
+}
+
+// GenDropFunction 生成带签名的 DROP FUNCTION；签名保证对重载函数的精准定位。
+func (p *PostgresDialect) GenDropFunction(fn *DbFunction) string {
+	return fmt.Sprintf(`DROP FUNCTION IF EXISTS %q(%s);`, fn.Name, fn.Signature)
+}
+
+// GenAddFunction 直接重放 pg_get_functiondef 的完整 CREATE OR REPLACE FUNCTION DDL。
+func (p *PostgresDialect) GenAddFunction(fn *DbFunction) string {
+	return ensureSemicolon(fn.Definition)
+}
+
 // GetTableIndexes implements IndexEnumerator: 枚举非约束索引（通过 pg_constraint.conindid
 // 排除由 PK/UNIQUE/EXCLUDE 约束占用的物理索引），返回带完整 CREATE INDEX DDL 的 DbIndex 列表。
 func (p *PostgresDialect) GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error) {

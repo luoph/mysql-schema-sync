@@ -406,6 +406,31 @@ func TestSchemaSync_diffTriggers(t *testing.T) {
 	})
 }
 
+func TestPostgresDialect_GenFunction(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("add function reuses definition and ensures semicolon", func(t *testing.T) {
+		fn := &DbFunction{
+			Name:       "fn_guard",
+			Signature:  "",
+			Definition: "CREATE OR REPLACE FUNCTION public.fn_guard() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RETURN NEW; END; $function$",
+		}
+		got := d.GenAddFunction(fn)
+		xt.Equal(t, true, strings.HasSuffix(got, ";"))
+		xt.Equal(t, true, strings.Contains(got, "CREATE OR REPLACE FUNCTION"))
+	})
+
+	t.Run("drop function with empty signature", func(t *testing.T) {
+		fn := &DbFunction{Name: "fn_guard", Signature: ""}
+		xt.Equal(t, `DROP FUNCTION IF EXISTS "fn_guard"();`, d.GenDropFunction(fn))
+	})
+
+	t.Run("drop overloaded function preserves args", func(t *testing.T) {
+		fn := &DbFunction{Name: "fn_add", Signature: "integer, integer"}
+		xt.Equal(t, `DROP FUNCTION IF EXISTS "fn_add"(integer, integer);`, d.GenDropFunction(fn))
+	})
+}
+
 func TestPostgresDialect_GenForeignKey(t *testing.T) {
 	d := &PostgresDialect{}
 

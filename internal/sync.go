@@ -490,6 +490,55 @@ func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
 	return sqls
 }
 
+// FunctionSyncSQLs 对比源/目标库中用户自定义函数，返回表循环前需要执行的 CREATE
+// 语句（保证 trigger 建立时函数已存在）与表循环后需要执行的 DROP 语句
+// （保证 trigger 先被移除后再回收孤立函数）。
+// 未实现 FunctionEnumerator 的 dialect（如 MySQL）返回 (nil, nil)。
+func (sc *SchemaSync) FunctionSyncSQLs() (pre, post []string) {
+	d := sc.getDialect()
+	fe, ok := d.(FunctionEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	sourceFns, err := sc.SourceDb.Functions()
+	if err != nil {
+		log.Printf("enumerate source functions failed: %s", errString(err))
+		return nil, nil
+	}
+	destFns, err := sc.DestDb.Functions()
+	if err != nil {
+		log.Printf("enumerate dest functions failed: %s", errString(err))
+		return nil, nil
+	}
+	fnKey := func(fn *DbFunction) string { return fn.Name + "(" + fn.Signature + ")" }
+
+	destMap := make(map[string]*DbFunction, len(destFns))
+	for _, fn := range destFns {
+		destMap[fnKey(fn)] = fn
+	}
+	sourceMap := make(map[string]*DbFunction, len(sourceFns))
+	for _, fn := range sourceFns {
+		sourceMap[fnKey(fn)] = fn
+	}
+
+	for _, src := range sourceFns {
+		dst, has := destMap[fnKey(src)]
+		if has && dst.Definition == src.Definition {
+			continue
+		}
+		pre = append(pre, fe.GenAddFunction(src))
+	}
+	if sc.Config.Drop {
+		for _, dst := range destFns {
+			if _, has := sourceMap[fnKey(dst)]; has {
+				continue
+			}
+			post = append(post, fe.GenDropFunction(dst))
+		}
+	}
+	return pre, post
+}
+
 // classifySQL separates standalone SQL from ALTER TABLE clauses
 func classifySQL(sqls []string, alterClauses, standaloneSQL *[]string) {
 	for _, s := range sqls {

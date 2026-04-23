@@ -23,6 +23,15 @@ func Execute(cfg *Config) {
 	allTables := sc.AllDBTables()
 	// log.Println("source db table total:", len(allTables))
 
+	// 库级对象同步（目前仅 PostgreSQL 触发）：
+	//   1) preFnSQLs：表同步前执行 CREATE OR REPLACE FUNCTION，保证 trigger 建立时其
+	//      关联函数已存在；
+	//   2) postFnSQLs：表同步后执行 DROP FUNCTION，此时已无 trigger 依赖它。
+	preFnSQLs, postFnSQLs := sc.FunctionSyncSQLs()
+	if err := runDDLBatch(sc, cfg, preFnSQLs, "pre_function_sync"); err != nil {
+		log.Println("pre_function_sync failed:", errString(err))
+	}
+
 	changedTables := make(map[string][]*TableAlterData)
 
 	for _, table := range allTables {
@@ -115,7 +124,35 @@ runSync:
 		goto runSync
 	}
 
+	// 表循环完成后再执行函数清理；此时源已不存在的 trigger 已被 DROP，孤立函数可安全回收。
+	if err := runDDLBatch(sc, cfg, postFnSQLs, "post_function_sync"); err != nil {
+		log.Println("post_function_sync failed:", errString(err))
+	}
+
 	if sc.Config.Sync {
 		log.Println("execute_all_sql_done, success_total:", countSuccess, "failed_total:", countFailed)
 	}
+}
+
+// runDDLBatch 打印并（cfg.Sync=true 时）向目标库执行一批独立 DDL 语句。
+// 用于库级对象同步（例如 CREATE OR REPLACE FUNCTION / DROP FUNCTION），
+// 每条语句独立执行，单条失败不影响其余语句。
+func runDDLBatch(sc *SchemaSync, cfg *Config, sqls []string, tag string) error {
+	if len(sqls) == 0 {
+		return nil
+	}
+	log.Printf("\n-- %s (%d) --\n", tag, len(sqls))
+	for _, s := range sqls {
+		fmt.Println(s)
+	}
+	if !cfg.Sync {
+		return nil
+	}
+	var firstErr error
+	for _, s := range sqls {
+		if err := sc.SyncSQL4Dest(s, []string{s}); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
