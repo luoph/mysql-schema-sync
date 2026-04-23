@@ -706,11 +706,17 @@ $function$`
 		xt.Equal(t, true, d.DefinitionsEqual(a, b))
 	})
 
-	t.Run("AST-level difference still not equal (known limitation)", func(t *testing.T) {
-		// CHECK 约束的 AST 差异无法靠空白折叠消除；如需消除必须走 round-trip canonical
-		a := "CHECK (((c)::text = ANY ((ARRAY['a'::varchar])::text[])))"
-		b := "CHECK (((c)::text = ANY (ARRAY[('a'::varchar)::text])))"
-		xt.Equal(t, false, d.DefinitionsEqual(a, b))
+	t.Run("array collective cast normalized to element cast", func(t *testing.T) {
+		// 用户实际 case 的 minimal 版本：源用集合级 cast，目标 PG 18 re-parse 后变元素级 cast
+		a := "CHECK (((c)::text = ANY ((ARRAY['a'::character varying])::text[])))"
+		b := "CHECK (((c)::text = ANY (ARRAY[('a'::character varying)::text])))"
+		xt.Equal(t, true, d.DefinitionsEqual(a, b))
+	})
+
+	t.Run("array cast plus varchar alias alignment", func(t *testing.T) {
+		a := "CHECK ((s)::varchar = ANY ((ARRAY['x'::varchar, 'y'::varchar])::text[]))"
+		b := "CHECK ((s)::character varying = ANY (ARRAY[('x'::character varying)::text, ('y'::character varying)::text]))"
+		xt.Equal(t, true, d.DefinitionsEqual(a, b))
 	})
 
 	t.Run("content difference remains", func(t *testing.T) {
@@ -718,6 +724,71 @@ $function$`
 		b := "CREATE INDEX idx ON t USING btree (user_id)"
 		xt.Equal(t, false, d.DefinitionsEqual(a, b))
 	})
+}
+
+func TestPgNormalizeExpr_UserCases(t *testing.T) {
+	d := &PostgresDialect{}
+
+	cases := []struct {
+		name string
+		src  string
+		dst  string
+	}{
+		{
+			name: "user_agent_file.category_check",
+			src:  "CHECK (((category)::text = ANY ((ARRAY['input'::character varying, 'output'::character varying])::text[])))",
+			dst:  "CHECK (((category)::text = ANY (ARRAY[('input'::character varying)::text, ('output'::character varying)::text])))",
+		},
+		{
+			name: "user_agent_file.origin_check",
+			src:  "CHECK (((origin)::text = ANY ((ARRAY['upload'::character varying, 'generated'::character varying, 'restored'::character varying])::text[])))",
+			dst:  "CHECK (((origin)::text = ANY (ARRAY[('upload'::character varying)::text, ('generated'::character varying)::text, ('restored'::character varying)::text])))",
+		},
+		{
+			name: "user_agent_schedule.status_check",
+			src:  "CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'paused'::character varying, 'disabled'::character varying, 'error'::character varying])::text[])))",
+			dst:  "CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('paused'::character varying)::text, ('disabled'::character varying)::text, ('error'::character varying)::text])))",
+		},
+		{
+			name: "user_agent_schedule_run.status_check (5 elements)",
+			src:  "CHECK (((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying, 'success'::character varying, 'failed'::character varying, 'skipped'::character varying])::text[])))",
+			dst:  "CHECK (((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('running'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('skipped'::character varying)::text])))",
+		},
+		{
+			name: "partial index WHERE clause with same pattern",
+			src:  "CREATE INDEX idx ON t USING btree (a, b) WHERE ((c IS NULL) AND ((s)::text = ANY ((ARRAY['x'::character varying, 'y'::character varying])::text[])))",
+			dst:  "CREATE INDEX idx ON t USING btree (a, b) WHERE ((c IS NULL) AND ((s)::text = ANY (ARRAY[('x'::character varying)::text, ('y'::character varying)::text])))",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			xt.Equal(t, true, d.DefinitionsEqual(tt.src, tt.dst))
+		})
+	}
+}
+
+func TestPgSplitTopLevelCommas(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{`'a'::text, 'b'::text`, []string{`'a'::text`, ` 'b'::text`}},
+		{`'a,b'::text, 'c'::text`, []string{`'a,b'::text`, ` 'c'::text`}},
+		{`f(x, y), g(z)`, []string{`f(x, y)`, ` g(z)`}},
+		{`ARRAY[1, 2], 3`, []string{`ARRAY[1, 2]`, ` 3`}},
+		{`single`, []string{`single`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got := pgSplitTopLevelCommas(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len mismatch: got %d want %d (%v vs %v)", len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				xt.Equal(t, tt.want[i], got[i])
+			}
+		})
+	}
 }
 
 func TestPgIndexTail(t *testing.T) {

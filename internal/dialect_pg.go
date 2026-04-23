@@ -623,21 +623,112 @@ func ensureSemicolon(sql string) string {
 }
 
 // pgCanonicalWhitespace 把任意空白（空格/制表符/换行）连续块折叠为单个空格，
-// 并去掉首尾空白。用于幂等比较：消除 PG 不同历史/版本 round-trip 引入的缩进与
-// 换行噪声。注意不处理 AST 层差异（如 ANY(ARRAY[...]::text[]) 与 ANY(ARRAY[...::text])
-// 这类等价但语法结构不同的表达式），此类仍会判为"不等"。
+// 并去掉首尾空白。第一层规范化，消除缩进/换行噪声。
 func pgCanonicalWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// DefinitionsEqual 比较前折叠空白。若两段 DDL 仅在缩进、换行上不同（典型 case：
-// 源库是用户手写 DDL，目标库被工具 CREATE OR REPLACE 过后 PG 重新序列化），会被
-// 判定为相等，避免反复触发重建。
+// pgTypeAliasRepl 把 ::短别名 映射到 ::长规范名（PG 内部 pg_get_*def 偏好长形式）。
+// 这一层覆盖 character varying ↔ varchar、int4 ↔ integer 等一族别名差异。
+var pgTypeAliasRepl = []struct{ from, to string }{
+	{"::varchar", "::character varying"},
+	{"::int4", "::integer"},
+	{"::int8", "::bigint"},
+	{"::int2", "::smallint"},
+	{"::float4", "::real"},
+	{"::float8", "::double precision"},
+	{"::bool", "::boolean"},
+	{"::timestamptz", "::timestamp with time zone"},
+	{"::timetz", "::time with time zone"},
+}
+
+// pgArrayCollectiveCastReg 识别 "(ARRAY[<elems>])::<type>[]" 集合级 cast。
+// 这是 PG parser 常见的两种等价重写之一，另一种是每个元素各自 ::type 的元素级 cast。
+// 约束/索引里 ARRAY 元素绝大多数是简单字面量（字符串 + cast），不含嵌套方括号，
+// 用非贪婪 `[^\]]*` 足以匹配；遇到极端嵌套表达式时正则不匹配、此规则自动放弃（降级到
+// 空白折叠比较），不会误伤。
+var pgArrayCollectiveCastReg = regexp.MustCompile(`\(ARRAY\[([^\]]*)\]\)::([a-z_]+(?:\s+[a-z_]+)*)\[\]`)
+
+// pgSplitTopLevelCommas 按顶层逗号切分表达式 element list，跳过位于引号内或括号/方括号
+// 内的逗号。PG 字符串字面量通过 '' 转义引号，没有反斜杠转义，状态机只需跟踪 '（toggle
+// 引号内外）和 () / [] 的嵌套深度。
+func pgSplitTopLevelCommas(s string) []string {
+	var parts []string
+	var cur strings.Builder
+	depth := 0
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\'':
+			inQuote = !inQuote
+			cur.WriteByte(c)
+		case '(', '[':
+			if !inQuote {
+				depth++
+			}
+			cur.WriteByte(c)
+		case ')', ']':
+			if !inQuote {
+				depth--
+			}
+			cur.WriteByte(c)
+		case ',':
+			if !inQuote && depth == 0 {
+				parts = append(parts, cur.String())
+				cur.Reset()
+			} else {
+				cur.WriteByte(c)
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if cur.Len() > 0 {
+		parts = append(parts, cur.String())
+	}
+	return parts
+}
+
+// pgNormalizeExpr 对 PG 表达式做启发式语义规范化，用于比较 CHECK 约束 / partial
+// index WHERE 等表达式。当前覆盖两层重写：
+//  1. 类型别名映射到长规范名（::varchar → ::character varying 等）
+//  2. ARRAY 集合级 cast (ARRAY[a,b])::T[] → 元素级 cast ARRAY[(a)::T, (b)::T]
+// 两侧 DDL 经此规范化后若相等，即认为 PG 语义等价，可在目标库只读、无法 round-trip
+// 的场景下继续幂等判等。未覆盖到的 AST 重写会回退到不等判定，保留真实差异可见性。
+func pgNormalizeExpr(s string) string {
+	s = pgCanonicalWhitespace(s)
+	for _, rule := range pgTypeAliasRepl {
+		s = strings.ReplaceAll(s, rule.from, rule.to)
+	}
+	s = pgArrayCollectiveCastReg.ReplaceAllStringFunc(s, func(match string) string {
+		sub := pgArrayCollectiveCastReg.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		elemList := sub[1]
+		typeName := strings.TrimSpace(sub[2])
+		elems := pgSplitTopLevelCommas(elemList)
+		normalized := make([]string, 0, len(elems))
+		for _, e := range elems {
+			normalized = append(normalized, "("+strings.TrimSpace(e)+")::"+typeName)
+		}
+		return "ARRAY[" + strings.Join(normalized, ", ") + "]"
+	})
+	return pgCanonicalWhitespace(s)
+}
+
+// DefinitionsEqual 先做空白折叠快速判等；不等时再用 pgNormalizeExpr 做表达式级归一化
+// 比较，覆盖典型 PG parser 等价重写（ARRAY 集合级 vs 元素级 cast、类型别名），让
+// 只读账号场景下也能消除常见的 AST 幻觉差异，无需 round-trip DDL。
 func (p *PostgresDialect) DefinitionsEqual(a, b string) bool {
 	if a == b {
 		return true
 	}
-	return pgCanonicalWhitespace(a) == pgCanonicalWhitespace(b)
+	if pgCanonicalWhitespace(a) == pgCanonicalWhitespace(b) {
+		return true
+	}
+	return pgNormalizeExpr(a) == pgNormalizeExpr(b)
 }
 
 // pgProbeSeq 为每次 round-trip probe 分配唯一后缀，避免同一会话内多次 probe 名称
