@@ -548,6 +548,49 @@ func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
 	return sqls
 }
 
+// ExtensionSyncSQLs 对比源/目标库的扩展，返回最前置执行的 CREATE 语句与
+// 最后执行的 DROP 语句。前者保证依赖 extension 的对象（函数/索引等）创建
+// 时不会报 "type/operator does not exist"；后者仅在 cfg.Drop=true 时返回，
+// 且放在所有清理步骤之后，避免级联误删用户对象。
+func (sc *SchemaSync) ExtensionSyncSQLs() (pre, post []string) {
+	d := sc.getDialect()
+	ee, ok := d.(ExtensionEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	sourceExts, err := sc.SourceDb.Extensions()
+	if err != nil {
+		log.Printf("enumerate source extensions failed: %s", errString(err))
+		return nil, nil
+	}
+	destExts, err := sc.DestDb.Extensions()
+	if err != nil {
+		log.Printf("enumerate dest extensions failed: %s", errString(err))
+		return nil, nil
+	}
+	destSet := make(map[string]*DbExtension, len(destExts))
+	for _, e := range destExts {
+		destSet[e.Name] = e
+	}
+	sourceSet := make(map[string]*DbExtension, len(sourceExts))
+	for _, e := range sourceExts {
+		sourceSet[e.Name] = e
+	}
+	for _, src := range sourceExts {
+		if _, has := destSet[src.Name]; !has {
+			pre = append(pre, ee.GenAddExtension(src))
+		}
+	}
+	if sc.Config.Drop {
+		for _, dst := range destExts {
+			if _, has := sourceSet[dst.Name]; !has {
+				post = append(post, ee.GenDropExtension(dst))
+			}
+		}
+	}
+	return pre, post
+}
+
 // FunctionSyncSQLs 对比源/目标库中用户自定义函数，返回表循环前需要执行的 CREATE
 // 语句（保证 trigger 建立时函数已存在）与表循环后需要执行的 DROP 语句
 // （保证 trigger 先被移除后再回收孤立函数）。

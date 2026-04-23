@@ -23,10 +23,17 @@ func Execute(cfg *Config) {
 	allTables := sc.AllDBTables()
 	// log.Println("source db table total:", len(allTables))
 
-	// 库级对象同步（目前仅 PostgreSQL 触发）：
-	//   1) preFnSQLs：表同步前执行 CREATE OR REPLACE FUNCTION，保证 trigger 建立时其
-	//      关联函数已存在；
-	//   2) postFnSQLs：表同步后执行 DROP FUNCTION，此时已无 trigger 依赖它。
+	// 库级对象同步（目前仅 PostgreSQL 触发）分三层执行，严格按依赖顺序排列：
+	//   0) preExtSQLs：CREATE EXTENSION IF NOT EXISTS，必须最先执行，否则依赖
+	//      extension 类型/操作符的函数和索引会失败（如 HNSW 索引引用 vector 扩展）
+	//   1) preFnSQLs：CREATE OR REPLACE FUNCTION，保证 trigger 建立时其关联函数已存在
+	//   2) 表循环
+	//   3) postFnSQLs：表同步后 DROP FUNCTION，此时已无 trigger 依赖
+	//   4) postExtSQLs：最后执行 DROP EXTENSION，避免级联误删用户对象
+	preExtSQLs, postExtSQLs := sc.ExtensionSyncSQLs()
+	if err := runDDLBatch(sc, cfg, preExtSQLs, "pre_extension_sync"); err != nil {
+		log.Println("pre_extension_sync failed:", errString(err))
+	}
 	preFnSQLs, postFnSQLs := sc.FunctionSyncSQLs()
 	if err := runDDLBatch(sc, cfg, preFnSQLs, "pre_function_sync"); err != nil {
 		log.Println("pre_function_sync failed:", errString(err))
@@ -128,6 +135,10 @@ runSync:
 	// 表循环完成后再执行函数清理；此时源已不存在的 trigger 已被 DROP，孤立函数可安全回收。
 	if err := runDDLBatch(sc, cfg, postFnSQLs, "post_function_sync"); err != nil {
 		log.Println("post_function_sync failed:", errString(err))
+	}
+	// 最后清理孤立扩展；仅 cfg.Drop=true 时非空。
+	if err := runDDLBatch(sc, cfg, postExtSQLs, "post_extension_sync"); err != nil {
+		log.Println("post_extension_sync failed:", errString(err))
 	}
 
 	if sc.Config.Sync {

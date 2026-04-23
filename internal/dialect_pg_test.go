@@ -479,6 +479,19 @@ func TestPostgresDialect_WrapAlterSQL(t *testing.T) {
 	})
 }
 
+func TestPostgresDialect_GenExtension(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("add uses IF NOT EXISTS", func(t *testing.T) {
+		xt.Equal(t, `CREATE EXTENSION IF NOT EXISTS "vector";`,
+			d.GenAddExtension(&DbExtension{Name: "vector"}))
+	})
+	t.Run("drop uses IF EXISTS", func(t *testing.T) {
+		xt.Equal(t, `DROP EXTENSION IF EXISTS "pgcrypto";`,
+			d.GenDropExtension(&DbExtension{Name: "pgcrypto"}))
+	})
+}
+
 func TestPostgresDialect_GenCommentIndexSQL(t *testing.T) {
 	d := &PostgresDialect{}
 

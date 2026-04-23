@@ -61,3 +61,22 @@ type FunctionEnumerator interface {
 	GenDropFunction(fn *DbFunction) string
 	GenAddFunction(fn *DbFunction) string
 }
+
+// DbExtension 表示一个已安装的 PostgreSQL 扩展。Name 足以作为同步键。
+// 版本同步（ALTER EXTENSION ... UPDATE）跨版本语义复杂，目前不做，
+// 仅保证"目标库装了所需 extension"这一 pre-condition。
+type DbExtension struct {
+	Name    string
+	Version string
+}
+
+// ExtensionEnumerator 是 Dialect 的可选能力：枚举并生成 CREATE/DROP EXTENSION DDL。
+// 执行顺序约束：pre-阶段（pre_extension_sync）必须早于所有可能依赖 extension
+// 的对象（普通函数、表、索引，例如 vector extension 的 vector_cosine_ops 在
+// HNSW 索引里被引用）；post-阶段（post_extension_sync）则必须晚于孤立对象的
+// 清理，避免因 extension 被级联移除而误删用户对象。
+type ExtensionEnumerator interface {
+	GetExtensions(db *sql.DB) ([]*DbExtension, error)
+	GenAddExtension(ext *DbExtension) string
+	GenDropExtension(ext *DbExtension) string
+}

@@ -739,6 +739,43 @@ func (p *PostgresDialect) GenAddFunction(fn *DbFunction) string {
 	return ensureSemicolon(fn.Definition)
 }
 
+// GetExtensions implements ExtensionEnumerator: 枚举已安装的扩展。
+// plpgsql 是 PostgreSQL 默认语言扩展，标准模板库会自带，跳过比对避免噪声。
+func (p *PostgresDialect) GetExtensions(db *sql.DB) ([]*DbExtension, error) {
+	const q = `
+		SELECT extname, extversion
+		FROM pg_extension
+		WHERE extname NOT IN ('plpgsql')
+		ORDER BY extname`
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("pg get extensions: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*DbExtension
+	for rows.Next() {
+		var name, version string
+		if err := rows.Scan(&name, &version); err != nil {
+			return nil, err
+		}
+		result = append(result, &DbExtension{Name: name, Version: version})
+	}
+	return result, rows.Err()
+}
+
+// GenAddExtension 用 IF NOT EXISTS 避免重复创建报错。
+func (p *PostgresDialect) GenAddExtension(ext *DbExtension) string {
+	return fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS %q;`, ext.Name)
+}
+
+// GenDropExtension 用 IF EXISTS 保持幂等。注意 DROP EXTENSION 会级联删除
+// 该扩展提供的所有对象（类型/函数/操作符/索引方法等），仅在 cfg.Drop=true
+// 时才会被调用。
+func (p *PostgresDialect) GenDropExtension(ext *DbExtension) string {
+	return fmt.Sprintf(`DROP EXTENSION IF EXISTS %q;`, ext.Name)
+}
+
 // GetTableIndexes implements IndexEnumerator: 枚举非约束索引（通过 pg_constraint.conindid
 // 排除由 PK/UNIQUE/EXCLUDE 约束占用的物理索引），返回带完整 CREATE INDEX DDL 的 DbIndex 列表。
 // 同时一并读取索引级 COMMENT（pg_description.objsubid=0），保存到 DbIndex.Comment。

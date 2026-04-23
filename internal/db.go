@@ -282,6 +282,18 @@ func (db *MyDb) TableTriggers(tableName string) ([]*DbTrigger, error) {
 	return te.GetTableTriggers(db.sqlDB, tableName)
 }
 
+// Extensions 通过 dialect 可选能力 ExtensionEnumerator 枚举已安装扩展。
+func (db *MyDb) Extensions() ([]*DbExtension, error) {
+	if db == nil || db.sqlDB == nil || db.dialect == nil {
+		return nil, nil
+	}
+	ee, ok := db.dialect.(ExtensionEnumerator)
+	if !ok {
+		return nil, nil
+	}
+	return ee.GetExtensions(db.sqlDB)
+}
+
 // TableComment 通过 dialect 可选能力 TableCommentEnumerator 读取表注释。
 func (db *MyDb) TableComment(tableName string) (string, error) {
 	if db == nil || db.sqlDB == nil || db.dialect == nil {
