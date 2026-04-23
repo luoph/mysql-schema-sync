@@ -110,6 +110,10 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 	sc.mergeExtraIndexes(alter.SchemaDiff.Source, sc.SourceDb, table)
 	sc.mergeExtraIndexes(alter.SchemaDiff.Dest, sc.DestDb, table)
 
+	// 注入触发器集合。MySQL dialect 未实现 TriggerEnumerator，无副作用。
+	sc.loadTriggers(alter.SchemaDiff.Source, sc.SourceDb, table)
+	sc.loadTriggers(alter.SchemaDiff.Dest, sc.DestDb, table)
+
 	if sSchema == dSchema {
 		return alter
 	}
@@ -132,11 +136,17 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 				alter.SQL = append(alter.SQL, strings.TrimRight(idx.SQL, ";")+";")
 			}
 		}
+		if te, ok := d.(TriggerEnumerator); ok {
+			for _, trg := range alter.SchemaDiff.Source.Triggers {
+				alter.SQL = append(alter.SQL, te.GenAddTrigger(trg))
+			}
+		}
 		return alter
 	}
 
 	alterClauses, standaloneSQL := sc.getSchemaDiff(alter)
-	if len(alterClauses) == 0 && len(standaloneSQL) == 0 {
+	triggerSQLs := sc.diffTriggers(alter)
+	if len(alterClauses) == 0 && len(standaloneSQL) == 0 && len(triggerSQLs) == 0 {
 		return alter
 	}
 	alter.Type = alterTypeAlter
@@ -144,6 +154,7 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 		alter.SQL = append(alter.SQL, d.WrapAlterSQL(table, alterClauses, cfg.SingleSchemaChange)...)
 	}
 	alter.SQL = append(alter.SQL, standaloneSQL...)
+	alter.SQL = append(alter.SQL, triggerSQLs...)
 
 	return alter
 }
@@ -420,6 +431,63 @@ func (sc *SchemaSync) mergeExtraIndexes(mys *MySchema, db *MyDb, table string) {
 		}
 		mys.IndexAll[idx.Name] = idx
 	}
+}
+
+// loadTriggers 通过 TriggerEnumerator 把表上用户触发器填充进 MySchema.Triggers。
+func (sc *SchemaSync) loadTriggers(mys *MySchema, db *MyDb, table string) {
+	if mys == nil || db == nil {
+		return
+	}
+	triggers, err := db.TableTriggers(table)
+	if err != nil {
+		log.Printf("[Debug] enumerate triggers for %q failed: %s", table, errString(err))
+		return
+	}
+	if len(triggers) == 0 {
+		return
+	}
+	if mys.Triggers == nil {
+		mys.Triggers = make(map[string]*DbTrigger, len(triggers))
+	}
+	for _, trg := range triggers {
+		mys.Triggers[trg.Name] = trg
+	}
+}
+
+// diffTriggers 对比两侧 trigger，返回待执行的 DDL（DROP + CREATE）。
+// 语义：
+//   - 目标有、源没有 → DROP（仅在 cfg.Drop 时）
+//   - 源有、目标没有 → CREATE
+//   - 两边都有但 Definition 不同 → DROP + CREATE（PG 无法 ALTER 触发器定义）
+func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
+	d := sc.getDialect()
+	te, ok := d.(TriggerEnumerator)
+	if !ok {
+		return nil
+	}
+	source := alter.SchemaDiff.Source.Triggers
+	dest := alter.SchemaDiff.Dest.Triggers
+
+	var sqls []string
+	for name, src := range source {
+		dst, has := dest[name]
+		if has && src.Definition == dst.Definition {
+			continue
+		}
+		if has {
+			sqls = append(sqls, te.GenDropTrigger(dst))
+		}
+		sqls = append(sqls, te.GenAddTrigger(src))
+	}
+	if sc.Config.Drop {
+		for name, dst := range dest {
+			if _, has := source[name]; has {
+				continue
+			}
+			sqls = append(sqls, te.GenDropTrigger(dst))
+		}
+	}
+	return sqls
 }
 
 // classifySQL separates standalone SQL from ALTER TABLE clauses

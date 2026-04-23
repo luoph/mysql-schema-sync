@@ -621,6 +621,50 @@ func ensureSemicolon(sql string) string {
 	return s
 }
 
+// GetTableTriggers implements TriggerEnumerator: 枚举指定表上的用户触发器。
+// 通过 NOT tgisinternal 过滤 PostgreSQL 为外键等内部维护的触发器；
+// Definition 使用 pg_get_triggerdef 的 pretty 输出，可直接在目标库重放。
+func (p *PostgresDialect) GetTableTriggers(db *sql.DB, tableName string) ([]*DbTrigger, error) {
+	const q = `
+		SELECT t.tgname, pg_get_triggerdef(t.oid, true) AS def
+		FROM pg_trigger t
+		JOIN pg_class c ON c.oid = t.tgrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public'
+		  AND c.relname = $1
+		  AND NOT t.tgisinternal
+		ORDER BY t.tgname`
+	rows, err := db.Query(q, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("pg get triggers for %q: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	var result []*DbTrigger
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return nil, err
+		}
+		result = append(result, &DbTrigger{
+			Name:       name,
+			Table:      tableName,
+			Definition: def,
+		})
+	}
+	return result, rows.Err()
+}
+
+// GenDropTrigger 生成 DROP TRIGGER 语句；trigger 在 PostgreSQL 中与其宿主表绑定。
+func (p *PostgresDialect) GenDropTrigger(trg *DbTrigger) string {
+	return fmt.Sprintf(`DROP TRIGGER IF EXISTS %q ON %q;`, trg.Name, trg.Table)
+}
+
+// GenAddTrigger 直接重放 pg_get_triggerdef 的完整 CREATE TRIGGER DDL。
+func (p *PostgresDialect) GenAddTrigger(trg *DbTrigger) string {
+	return ensureSemicolon(trg.Definition)
+}
+
 // GetTableIndexes implements IndexEnumerator: 枚举非约束索引（通过 pg_constraint.conindid
 // 排除由 PK/UNIQUE/EXCLUDE 约束占用的物理索引），返回带完整 CREATE INDEX DDL 的 DbIndex 列表。
 func (p *PostgresDialect) GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error) {

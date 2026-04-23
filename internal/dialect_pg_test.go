@@ -310,6 +310,102 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	})
 }
 
+func TestPostgresDialect_GenTrigger(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("add trigger uses pg_get_triggerdef output", func(t *testing.T) {
+		trg := &DbTrigger{
+			Name:       "trg_guard",
+			Table:      "user_document",
+			Definition: "CREATE TRIGGER trg_guard BEFORE UPDATE ON user_document FOR EACH ROW EXECUTE FUNCTION fn_guard()",
+		}
+		xt.Equal(t,
+			"CREATE TRIGGER trg_guard BEFORE UPDATE ON user_document FOR EACH ROW EXECUTE FUNCTION fn_guard();",
+			d.GenAddTrigger(trg))
+	})
+
+	t.Run("add trigger preserves existing semicolon", func(t *testing.T) {
+		trg := &DbTrigger{Name: "trg_a", Table: "t", Definition: "CREATE TRIGGER trg_a BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();"}
+		xt.Equal(t, trg.Definition, d.GenAddTrigger(trg))
+	})
+
+	t.Run("drop trigger quotes identifiers", func(t *testing.T) {
+		trg := &DbTrigger{Name: "trg_a", Table: "user_document"}
+		xt.Equal(t, `DROP TRIGGER IF EXISTS "trg_a" ON "user_document";`, d.GenDropTrigger(trg))
+	})
+}
+
+func TestSchemaSync_diffTriggers(t *testing.T) {
+	cfgDrop := &Config{Drop: true}
+	cfgNoDrop := &Config{Drop: false}
+
+	mkSC := func(cfg *Config) *SchemaSync {
+		return &SchemaSync{Config: cfg, SourceDb: &MyDb{dialect: &PostgresDialect{}}}
+	}
+	trg := func(name, def string) *DbTrigger {
+		return &DbTrigger{Name: name, Table: "t", Definition: def}
+	}
+
+	t.Run("source add", func(t *testing.T) {
+		alter := &TableAlterData{
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a ...")}},
+				Dest:   &MySchema{},
+			},
+		}
+		sqls := mkSC(cfgNoDrop).diffTriggers(alter)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, "CREATE TRIGGER a ...;", sqls[0])
+	})
+
+	t.Run("definition changed: drop then create", func(t *testing.T) {
+		alter := &TableAlterData{
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a v2")}},
+				Dest:   &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a v1")}},
+			},
+		}
+		sqls := mkSC(cfgNoDrop).diffTriggers(alter)
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP TRIGGER IF EXISTS "a" ON "t";`, sqls[0])
+		xt.Equal(t, "CREATE TRIGGER a v2;", sqls[1])
+	})
+
+	t.Run("unchanged: no sql", func(t *testing.T) {
+		alter := &TableAlterData{
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a")}},
+				Dest:   &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a")}},
+			},
+		}
+		sqls := mkSC(cfgNoDrop).diffTriggers(alter)
+		xt.Equal(t, 0, len(sqls))
+	})
+
+	t.Run("dest only + drop enabled: drop", func(t *testing.T) {
+		alter := &TableAlterData{
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{},
+				Dest:   &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a")}},
+			},
+		}
+		sqls := mkSC(cfgDrop).diffTriggers(alter)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `DROP TRIGGER IF EXISTS "a" ON "t";`, sqls[0])
+	})
+
+	t.Run("dest only + drop disabled: keep", func(t *testing.T) {
+		alter := &TableAlterData{
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{},
+				Dest:   &MySchema{Triggers: map[string]*DbTrigger{"a": trg("a", "CREATE TRIGGER a")}},
+			},
+		}
+		sqls := mkSC(cfgNoDrop).diffTriggers(alter)
+		xt.Equal(t, 0, len(sqls))
+	})
+}
+
 func TestPostgresDialect_GenForeignKey(t *testing.T) {
 	d := &PostgresDialect{}
 

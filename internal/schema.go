@@ -14,6 +14,7 @@ type MySchema struct {
 	FieldInfos map[string]*FieldInfo        // New: structured field information
 	IndexAll   map[string]*DbIndex
 	ForeignAll map[string]*DbIndex
+	Triggers   map[string]*DbTrigger // 由 TriggerEnumerator 注入；仅 PG
 	SchemaRaw  string
 }
 
