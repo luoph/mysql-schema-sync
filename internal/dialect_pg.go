@@ -621,6 +621,24 @@ func ensureSemicolon(sql string) string {
 	return s
 }
 
+// pgCanonicalWhitespace 把任意空白（空格/制表符/换行）连续块折叠为单个空格，
+// 并去掉首尾空白。用于幂等比较：消除 PG 不同历史/版本 round-trip 引入的缩进与
+// 换行噪声。注意不处理 AST 层差异（如 ANY(ARRAY[...]::text[]) 与 ANY(ARRAY[...::text])
+// 这类等价但语法结构不同的表达式），此类仍会判为"不等"。
+func pgCanonicalWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// DefinitionsEqual 比较前折叠空白。若两段 DDL 仅在缩进、换行上不同（典型 case：
+// 源库是用户手写 DDL，目标库被工具 CREATE OR REPLACE 过后 PG 重新序列化），会被
+// 判定为相等，避免反复触发重建。
+func (p *PostgresDialect) DefinitionsEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	return pgCanonicalWhitespace(a) == pgCanonicalWhitespace(b)
+}
+
 // GetTableTriggers implements TriggerEnumerator: 枚举指定表上的用户触发器。
 // 通过 NOT tgisinternal 过滤 PostgreSQL 为外键等内部维护的触发器；
 // Definition 使用 pg_get_triggerdef 的 pretty 输出，可直接在目标库重放。

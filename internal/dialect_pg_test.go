@@ -665,6 +665,61 @@ func TestPgSerialTypeFor(t *testing.T) {
 	}
 }
 
+func TestPostgresDialect_DefinitionsEqual(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("byte-identical", func(t *testing.T) {
+		s := "CREATE INDEX idx ON t USING btree (id)"
+		xt.Equal(t, true, d.DefinitionsEqual(s, s))
+	})
+
+	t.Run("whitespace-only diff collapses to equal", func(t *testing.T) {
+		// 正好复现用户报告的函数空白噪声：两行缩进 7 vs 8 空格
+		a := `CREATE OR REPLACE FUNCTION public.fn_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+       IF x = 1 THEN
+           RETURN NEW;
+       END IF;
+       RETURN NEW;
+END;
+$function$`
+		b := `CREATE OR REPLACE FUNCTION public.fn_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+        IF x = 1 THEN
+            RETURN NEW;
+        END IF;
+        RETURN NEW;
+END;
+$function$`
+		xt.Equal(t, true, d.DefinitionsEqual(a, b))
+	})
+
+	t.Run("newline vs single space collapses", func(t *testing.T) {
+		a := "CREATE INDEX idx ON t\nUSING btree (id)"
+		b := "CREATE INDEX idx ON t USING btree (id)"
+		xt.Equal(t, true, d.DefinitionsEqual(a, b))
+	})
+
+	t.Run("AST-level difference still not equal (known limitation)", func(t *testing.T) {
+		// CHECK 约束的 AST 差异无法靠空白折叠消除；如需消除必须走 round-trip canonical
+		a := "CHECK (((c)::text = ANY ((ARRAY['a'::varchar])::text[])))"
+		b := "CHECK (((c)::text = ANY (ARRAY[('a'::varchar)::text])))"
+		xt.Equal(t, false, d.DefinitionsEqual(a, b))
+	})
+
+	t.Run("content difference remains", func(t *testing.T) {
+		a := "CREATE INDEX idx ON t USING btree (id)"
+		b := "CREATE INDEX idx ON t USING btree (user_id)"
+		xt.Equal(t, false, d.DefinitionsEqual(a, b))
+	})
+}
+
 func TestPgCleanDefault(t *testing.T) {
 	tests := []struct {
 		input string

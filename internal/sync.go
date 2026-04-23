@@ -358,7 +358,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 		log.Println("[Debug] indexName---->[", fmt.Sprintf("%s.%s", table, indexName),
 			"] dest_has:", has, "\ndest_idx:", dIdx, "\nsource_idx:", idx)
 		var indexSQLs []string
-		sqlChanged := has && idx.SQL != dIdx.SQL
+		sqlChanged := has && !sc.definitionsEqual(idx.SQL, dIdx.SQL)
 		if has {
 			if sqlChanged {
 				indexSQLs = d.GenAddIndex(table, idx, true)
@@ -411,7 +411,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 			"] dest_has:", has, "\ndest_idx:", dIdx, "\nsource_idx:", idx)
 		var fkSQLs []string
 		if has {
-			if idx.SQL != dIdx.SQL {
+			if !sc.definitionsEqual(idx.SQL, dIdx.SQL) {
 				fkSQLs = d.GenAddForeignKey(table, idx, true)
 			}
 		} else {
@@ -534,7 +534,7 @@ func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
 	var sqls []string
 	for name, src := range source {
 		dst, has := dest[name]
-		if has && src.Definition == dst.Definition {
+		if has && sc.definitionsEqual(src.Definition, dst.Definition) {
 			continue
 		}
 		if has {
@@ -551,6 +551,18 @@ func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
 		}
 	}
 	return sqls
+}
+
+// definitionsEqual 判定两段 DDL 定义文本是否语义等价，优先走 dialect 的
+// DefinitionComparer 可选实现以消除 round-trip noise；未实现时回退到精确相等。
+func (sc *SchemaSync) definitionsEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if dc, ok := sc.getDialect().(DefinitionComparer); ok {
+		return dc.DefinitionsEqual(a, b)
+	}
+	return false
 }
 
 // ExtensionSyncSQLs 对比源/目标库的扩展，返回最前置执行的 CREATE 语句与
@@ -629,7 +641,7 @@ func (sc *SchemaSync) FunctionSyncSQLs() (pre, post []string) {
 
 	for _, src := range sourceFns {
 		dst, has := destMap[fnKey(src)]
-		if has && dst.Definition == src.Definition {
+		if has && sc.definitionsEqual(src.Definition, dst.Definition) {
 			continue
 		}
 		pre = append(pre, fe.GenAddFunction(src))

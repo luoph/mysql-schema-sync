@@ -2,6 +2,16 @@ package internal
 
 import "database/sql"
 
+// DefinitionComparer 是 Dialect 的可选能力：判定两段 DDL 定义是否"语义等价"。
+// 需要它的原因是 PostgreSQL 的 pg_get_functiondef / pg_get_triggerdef /
+// pg_get_indexdef / pg_get_constraintdef 等 round-trip 输出在不同历史（手写 DDL
+// vs 工具 CREATE OR REPLACE vs 版本升级后 re-parse）下会产生纯空白、换行、缩进
+// 等 noise 差异，直接字符串相等比较会在已经同步后仍反复触发重建。
+// 实现者应屏蔽这类 noise；MySQL 未实现时走默认精确比较。
+type DefinitionComparer interface {
+	DefinitionsEqual(a, b string) bool
+}
+
 // IndexEnumerator 是 Dialect 的可选能力：通过直接查询数据库元信息枚举"非 constraint
 // 支撑"的索引（普通 btree、GIN、HNSW、partial、表达式索引等）。
 //
