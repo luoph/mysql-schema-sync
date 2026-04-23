@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -637,6 +638,136 @@ func (p *PostgresDialect) DefinitionsEqual(a, b string) bool {
 		return true
 	}
 	return pgCanonicalWhitespace(a) == pgCanonicalWhitespace(b)
+}
+
+// pgProbeSeq 为每次 round-trip probe 分配唯一后缀，避免同一会话内多次 probe 名称
+// 冲突；ATomic 计数足够（单进程内）。
+var pgProbeSeq uint64
+
+func pgProbeName(prefix string) string {
+	return fmt.Sprintf("_%s_%d", prefix, atomic.AddUint64(&pgProbeSeq, 1))
+}
+
+// pgProbeCapability 缓存目标库是否允许 CREATE TEMP TABLE 的探测结果，避免只读
+// 账号场景下每个对象都重复撞权限错误。取值：0=未探测 / 1=可用 / 2=不可用。
+var pgProbeCapability atomic.Int32
+
+// pgProbeCapabilityCheck 懒探测；首次失败后打印一次警告，之后快速熄火。
+// 返回 false 表示本次 round-trip canonical 不可用，调用方应跳过并回退到保守
+// 判等（认为不等，保留真实差异的可见性）。
+func pgProbeCapabilityCheck(db *sql.DB) bool {
+	switch pgProbeCapability.Load() {
+	case 1:
+		return true
+	case 2:
+		return false
+	}
+	// 首次探测：建一张立即丢弃的 TEMP 表。CREATE TEMP 需要目标库 schema 级 TEMP
+	// 权限（默认 PUBLIC 拥有，但 DBA 可 REVOKE）。
+	if _, err := db.Exec(`CREATE TEMP TABLE _schema_sync_probe_cap (i int)`); err != nil {
+		pgProbeCapability.Store(2)
+		log.Printf("[Warning] dest db has no CREATE TEMP privilege (%s); AST-level canonical comparison for CHECK constraints and partial/expression indexes is disabled. 这些对象可能反复生成 DROP+CREATE DDL；解决办法：换一个有 TEMP 权限的账号，或在 alter_ignore 里显式忽略这些名字。", errString(err))
+		return false
+	}
+	_, _ = db.Exec(`DROP TABLE _schema_sync_probe_cap`)
+	pgProbeCapability.Store(1)
+	return true
+}
+
+// RoundTripCanonicalConstraint 在 db 上用 TEMP 表 clone tableName 结构，然后把
+// constraintDef（形如 "CHECK (...)" / "UNIQUE (...)" 等去掉 CONSTRAINT 前缀的部分）
+// 作为 ADD CONSTRAINT 的尾部喂入，再读回 pg_get_constraintdef 的规范化输出。
+// 整个过程在一个被回滚的事务中完成，不改变目标库持久状态；TEMP 表仅当前会话可见。
+func (p *PostgresDialect) RoundTripCanonicalConstraint(db *sql.DB, tableName, constraintDef string) (string, error) {
+	if !pgProbeCapabilityCheck(db) {
+		return "", nil // 能力禁用，调用方按"未知"处理
+	}
+	probeTable := pgProbeName("probe_tbl")
+	probeCon := pgProbeName("probe_con")
+
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	createSQL := fmt.Sprintf(`CREATE TEMP TABLE %q (LIKE %q INCLUDING DEFAULTS)`, probeTable, tableName)
+	if _, err := tx.Exec(createSQL); err != nil {
+		return "", fmt.Errorf("create temp probe table: %w", err)
+	}
+
+	addSQL := fmt.Sprintf(`ALTER TABLE %q ADD CONSTRAINT %q %s`, probeTable, probeCon, constraintDef)
+	if _, err := tx.Exec(addSQL); err != nil {
+		return "", fmt.Errorf("add probe constraint: %w", err)
+	}
+
+	const q = `SELECT pg_get_constraintdef(c.oid)
+		FROM pg_constraint c
+		JOIN pg_class t ON c.conrelid = t.oid
+		WHERE t.relname = $1 AND c.conname = $2`
+	var canonical string
+	if err := tx.QueryRow(q, probeTable, probeCon).Scan(&canonical); err != nil {
+		return "", fmt.Errorf("read probe constraint canonical: %w", err)
+	}
+	return canonical, nil
+}
+
+// pgIndexHeadReg 匹配 CREATE [UNIQUE] INDEX <name> ON <table> 的开头部分，
+// 用于把原 DDL 里的索引名与表名替换为 probe 占位，便于在 TEMP 表上重建。
+var pgIndexHeadReg = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+\S+\s+ON\s+\S+`)
+
+// pgIndexTailReg 抽取 "USING ..." 之后的所有内容（包含 method、列/表达式、可选 WHERE 子句），
+// 作为可直接比较的索引核心定义，忽略索引名/表名差异。
+var pgIndexTailReg = regexp.MustCompile(`(?is)\s+USING\s+.+$`)
+
+func pgIndexTail(def string) string {
+	m := pgIndexTailReg.FindString(def)
+	return pgCanonicalWhitespace(m)
+}
+
+// RoundTripCanonicalIndex 用 TEMP 表 clone tableName 结构，把 indexDef 改写为
+// "CREATE INDEX <probeIdx> ON <probeTable> ..." 后执行，再读回 pg_get_indexdef
+// 的规范化输出。返回值**仅保留 USING 起的 tail 部分**（通过 pgIndexTail 提取），
+// 调用方用 pgIndexTail 把目标 def 也归一后再比较即可消除索引名/表名差异。
+func (p *PostgresDialect) RoundTripCanonicalIndex(db *sql.DB, tableName, indexDef string) (string, error) {
+	if !pgProbeCapabilityCheck(db) {
+		return "", nil
+	}
+	probeTable := pgProbeName("probe_tbl")
+	probeIdx := pgProbeName("probe_idx")
+
+	unique := ""
+	if strings.Contains(strings.ToUpper(indexDef), "CREATE UNIQUE INDEX") {
+		unique = "UNIQUE "
+	}
+	rewritten := pgIndexHeadReg.ReplaceAllString(indexDef, fmt.Sprintf(`CREATE %sINDEX %s ON %s`, unique, probeIdx, probeTable))
+	if rewritten == indexDef {
+		return "", fmt.Errorf("cannot rewrite index head: %s", indexDef)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	createSQL := fmt.Sprintf(`CREATE TEMP TABLE %q (LIKE %q INCLUDING DEFAULTS)`, probeTable, tableName)
+	if _, err := tx.Exec(createSQL); err != nil {
+		return "", fmt.Errorf("create temp probe table: %w", err)
+	}
+
+	if _, err := tx.Exec(rewritten); err != nil {
+		return "", fmt.Errorf("create probe index: %w", err)
+	}
+
+	const q = `SELECT pg_get_indexdef(ic.oid)
+		FROM pg_class ic
+		WHERE ic.relname = $1`
+	var canonical string
+	if err := tx.QueryRow(q, probeIdx).Scan(&canonical); err != nil {
+		return "", fmt.Errorf("read probe index canonical: %w", err)
+	}
+	return pgIndexTail(canonical), nil
 }
 
 // GetTableTriggers implements TriggerEnumerator: 枚举指定表上的用户触发器。

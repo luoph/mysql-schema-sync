@@ -358,7 +358,19 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 		log.Println("[Debug] indexName---->[", fmt.Sprintf("%s.%s", table, indexName),
 			"] dest_has:", has, "\ndest_idx:", dIdx, "\nsource_idx:", idx)
 		var indexSQLs []string
-		sqlChanged := has && !sc.definitionsEqual(idx.SQL, dIdx.SQL)
+		// CHECK 约束与普通索引可能存在 AST 级等价但 pg_get_*def 文本不同的噪声，
+		// 走 round-trip canonical 兜底；其他类型（PK/UNIQUE）对 AST 差异不敏感，
+		// 仍按空白折叠判等即可。
+		var sqlEqual bool
+		switch idx.IndexType {
+		case checkConstraint:
+			sqlEqual = has && sc.indexOrConstraintEqual(table, "constraint", idx.SQL, dIdx.SQL)
+		case indexTypeIndex:
+			sqlEqual = has && sc.indexOrConstraintEqual(table, "index", idx.SQL, dIdx.SQL)
+		default:
+			sqlEqual = has && sc.definitionsEqual(idx.SQL, dIdx.SQL)
+		}
+		sqlChanged := has && !sqlEqual
 		if has {
 			if sqlChanged {
 				indexSQLs = d.GenAddIndex(table, idx, true)
@@ -561,6 +573,50 @@ func (sc *SchemaSync) definitionsEqual(a, b string) bool {
 	}
 	if dc, ok := sc.getDialect().(DefinitionComparer); ok {
 		return dc.DefinitionsEqual(a, b)
+	}
+	return false
+}
+
+// indexOrConstraintEqual 先用空白折叠快速判等；不等时走 RoundTripCanonicalComparer
+// 兜底，在目标库 TEMP 表上重建源 DDL 得到"目标 PG 版本 canonical"，再与目标当前
+// def 比较。这是消除 CHECK / partial / expression 索引 AST 级噪声差异的关键路径。
+// 参数 kind = "constraint" 走约束 probe；kind = "index" 走索引 probe。
+// probe 失败（缺连接、缺能力、或 PG 拒绝重建）时回退到空白折叠结果，避免误报
+// 等价。
+func (sc *SchemaSync) indexOrConstraintEqual(table, kind, srcDef, dstDef string) bool {
+	if sc.definitionsEqual(srcDef, dstDef) {
+		return true
+	}
+	rc, ok := sc.getDialect().(RoundTripCanonicalComparer)
+	if !ok || sc.DestDb == nil || sc.DestDb.sqlDB == nil {
+		return false
+	}
+	switch kind {
+	case "constraint":
+		canonical, err := rc.RoundTripCanonicalConstraint(sc.DestDb.sqlDB, table, srcDef)
+		if err != nil {
+			log.Printf("[Debug] round-trip constraint canonical for %q failed: %s", table, errString(err))
+			return false
+		}
+		if canonical == "" {
+			// probe 能力禁用（如只读账号无 TEMP 权限）：已在首次检测时打 Warning；
+			// 保守回退到"不等"，真实差异依然可见，AST 噪声会反复出现，由用户选择
+			// 换账号或 alter_ignore 忽略。
+			return false
+		}
+		return sc.definitionsEqual(canonical, dstDef)
+	case "index":
+		srcCanonical, err := rc.RoundTripCanonicalIndex(sc.DestDb.sqlDB, table, srcDef)
+		if err != nil {
+			log.Printf("[Debug] round-trip index canonical for %q failed: %s", table, errString(err))
+			return false
+		}
+		if srcCanonical == "" {
+			return false
+		}
+		// RoundTripCanonicalIndex 返回的已是 "USING ..." tail；目标 def 同样取 tail 再比。
+		// 此路径仅 PG 会进入，pgIndexTail 是 PG 专属的 helper。
+		return sc.definitionsEqual(srcCanonical, pgIndexTail(dstDef))
 	}
 	return false
 }

@@ -2,6 +2,23 @@ package internal
 
 import "database/sql"
 
+// RoundTripCanonicalComparer 是 Dialect 的可选能力：把源 DDL 在目标库上"原样重建
+// 到一张临时结构上"，然后读回 canonical，用来消除 AST 级等价但文本不同的差异
+// （典型场景：CHECK 约束里 ANY(ARRAY[...]::text[]) vs ANY(ARRAY[...::text]) — 源
+// 历史上由旧版 PG 创建、目标由新版 PG 通过 ADD CONSTRAINT 重写后，pg_get_constraintdef
+// 反向打印结果不同，但语义相同）。
+//
+// 调用者应在空白折叠判等失败后再走此路径作为兜底，以便把成本限制在少数"疑似差异"
+// 的对象上。
+type RoundTripCanonicalComparer interface {
+	// RoundTripCanonicalConstraint 用 tableName 的表结构建临时表，把 constraintDef 原样
+	// ADD 上去，再读回 pg_get_constraintdef 的规范化输出作为源 canonical。
+	RoundTripCanonicalConstraint(db *sql.DB, tableName, constraintDef string) (string, error)
+	// RoundTripCanonicalIndex 与 RoundTripCanonicalConstraint 类似，但改用 CREATE INDEX
+	// 在临时表上重建，返回的 canonical 已规范化表名/索引名，可直接与目标 def 的 tail 比较。
+	RoundTripCanonicalIndex(db *sql.DB, tableName, indexDef string) (string, error)
+}
+
 // DefinitionComparer 是 Dialect 的可选能力：判定两段 DDL 定义是否"语义等价"。
 // 需要它的原因是 PostgreSQL 的 pg_get_functiondef / pg_get_triggerdef /
 // pg_get_indexdef / pg_get_constraintdef 等 round-trip 输出在不同历史（手写 DDL

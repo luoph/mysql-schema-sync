@@ -720,6 +720,57 @@ $function$`
 	})
 }
 
+func TestPgIndexTail(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			"basic btree",
+			"CREATE INDEX idx_abc ON public.t USING btree (col)",
+			"USING btree (col)",
+		},
+		{
+			"partial index with WHERE",
+			"CREATE INDEX idx_x ON public.t USING btree (a, b) WHERE (deleted = false)",
+			"USING btree (a, b) WHERE (deleted = false)",
+		},
+		{
+			"gin with opclass",
+			"CREATE INDEX idx_tsv ON public.t USING gin (tsv)",
+			"USING gin (tsv)",
+		},
+		{
+			"temp table probe head is stripped (tail identical)",
+			"CREATE INDEX _probe_idx_1 ON pg_temp._probe_tbl_2 USING btree (channel) WHERE (status = 'ok')",
+			"USING btree (channel) WHERE (status = 'ok')",
+		},
+		{
+			"no USING clause returns empty",
+			"CREATE INDEX idx_x ON t (a)",
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xt.Equal(t, tt.want, pgIndexTail(tt.in))
+		})
+	}
+}
+
+func TestPgProbeName_Unique(t *testing.T) {
+	// 确认多次调用产生唯一名字（同一会话内不冲突）
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		n := pgProbeName("x")
+		if seen[n] {
+			t.Fatalf("duplicate probe name: %s", n)
+		}
+		seen[n] = true
+	}
+}
+
 func TestPgCleanDefault(t *testing.T) {
 	tests := []struct {
 		input string
