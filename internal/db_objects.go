@@ -13,6 +13,14 @@ type IndexEnumerator interface {
 	GetTableIndexes(db *sql.DB, tableName string) ([]*DbIndex, error)
 }
 
+// TableCommentEnumerator 是 Dialect 的可选能力：读取与生成表级注释 DDL。
+// MySQL 的表注释原本就嵌在 CREATE TABLE 的 COMMENT= 子句里，不需要独立处理，
+// 因此只有 PostgreSQL 需要实现这个能力。
+type TableCommentEnumerator interface {
+	GetTableComment(db *sql.DB, tableName string) (string, error)
+	GenCommentTableSQL(tableName, comment string) string
+}
+
 // DbTrigger 表示一个用户触发器。Definition 保存完整可执行的
 // CREATE TRIGGER DDL（如 pg_get_triggerdef 的输出），方便目标库直接重放。
 type DbTrigger struct {

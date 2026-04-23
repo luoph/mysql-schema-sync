@@ -114,6 +114,11 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 	sc.loadTriggers(alter.SchemaDiff.Source, sc.SourceDb, table)
 	sc.loadTriggers(alter.SchemaDiff.Dest, sc.DestDb, table)
 
+	// 注入表注释。MySQL 的表注释嵌在 CREATE TABLE 内，不走这条路径，dialect
+	// 未实现 TableCommentEnumerator 时此调用为 no-op。
+	sc.loadTableComment(alter.SchemaDiff.Source, sc.SourceDb, table)
+	sc.loadTableComment(alter.SchemaDiff.Dest, sc.DestDb, table)
+
 	if sSchema == dSchema {
 		return alter
 	}
@@ -141,12 +146,16 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 				alter.SQL = append(alter.SQL, te.GenAddTrigger(trg))
 			}
 		}
+		if tce, ok := d.(TableCommentEnumerator); ok && alter.SchemaDiff.Source.TableComment != "" {
+			alter.SQL = append(alter.SQL, tce.GenCommentTableSQL(table, alter.SchemaDiff.Source.TableComment))
+		}
 		return alter
 	}
 
 	alterClauses, standaloneSQL := sc.getSchemaDiff(alter)
 	triggerSQLs := sc.diffTriggers(alter)
-	if len(alterClauses) == 0 && len(standaloneSQL) == 0 && len(triggerSQLs) == 0 {
+	tableCommentSQL := sc.diffTableComment(alter)
+	if len(alterClauses) == 0 && len(standaloneSQL) == 0 && len(triggerSQLs) == 0 && tableCommentSQL == "" {
 		return alter
 	}
 	alter.Type = alterTypeAlter
@@ -155,6 +164,9 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 	}
 	alter.SQL = append(alter.SQL, standaloneSQL...)
 	alter.SQL = append(alter.SQL, triggerSQLs...)
+	if tableCommentSQL != "" {
+		alter.SQL = append(alter.SQL, tableCommentSQL)
+	}
 
 	return alter
 }
@@ -433,6 +445,19 @@ func (sc *SchemaSync) mergeExtraIndexes(mys *MySchema, db *MyDb, table string) {
 	}
 }
 
+// loadTableComment 通过 TableCommentEnumerator 读取表注释并填充到 MySchema.TableComment。
+func (sc *SchemaSync) loadTableComment(mys *MySchema, db *MyDb, table string) {
+	if mys == nil || db == nil {
+		return
+	}
+	comment, err := db.TableComment(table)
+	if err != nil {
+		log.Printf("[Debug] read table comment for %q failed: %s", table, errString(err))
+		return
+	}
+	mys.TableComment = comment
+}
+
 // loadTriggers 通过 TriggerEnumerator 把表上用户触发器填充进 MySchema.Triggers。
 func (sc *SchemaSync) loadTriggers(mys *MySchema, db *MyDb, table string) {
 	if mys == nil || db == nil {
@@ -452,6 +477,22 @@ func (sc *SchemaSync) loadTriggers(mys *MySchema, db *MyDb, table string) {
 	for _, trg := range triggers {
 		mys.Triggers[trg.Name] = trg
 	}
+}
+
+// diffTableComment 对比两侧表注释，返回 COMMENT ON TABLE DDL；无变化返回空串。
+// 源库注释清空（TableComment 为 ""）且目标有内容时，输出 COMMENT ON TABLE ... IS NULL 以撤销。
+func (sc *SchemaSync) diffTableComment(alter *TableAlterData) string {
+	d := sc.getDialect()
+	tce, ok := d.(TableCommentEnumerator)
+	if !ok {
+		return ""
+	}
+	src := alter.SchemaDiff.Source.TableComment
+	dst := alter.SchemaDiff.Dest.TableComment
+	if src == dst {
+		return ""
+	}
+	return tce.GenCommentTableSQL(alter.Table, src)
 }
 
 // diffTriggers 对比两侧 trigger，返回待执行的 DDL（DROP + CREATE）。

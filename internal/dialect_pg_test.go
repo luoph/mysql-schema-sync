@@ -479,6 +479,50 @@ func TestPostgresDialect_WrapAlterSQL(t *testing.T) {
 	})
 }
 
+func TestPostgresDialect_GenCommentTableSQL(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("set comment", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON TABLE "user_note" IS '用户笔记';`,
+			d.GenCommentTableSQL("user_note", "用户笔记"))
+	})
+	t.Run("clear comment", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON TABLE "user_note" IS NULL;`,
+			d.GenCommentTableSQL("user_note", ""))
+	})
+	t.Run("escape single quote", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON TABLE "t" IS 'it''s a table';`,
+			d.GenCommentTableSQL("t", "it's a table"))
+	})
+}
+
+func TestSchemaSync_diffTableComment(t *testing.T) {
+	mkSC := func() *SchemaSync {
+		return &SchemaSync{Config: &Config{}, SourceDb: &MyDb{dialect: &PostgresDialect{}}}
+	}
+	mkAlter := func(src, dst string) *TableAlterData {
+		return &TableAlterData{
+			Table: "t",
+			SchemaDiff: &SchemaDiff{
+				Source: &MySchema{TableComment: src},
+				Dest:   &MySchema{TableComment: dst},
+			},
+		}
+	}
+	t.Run("unchanged: empty sql", func(t *testing.T) {
+		xt.Equal(t, "", mkSC().diffTableComment(mkAlter("a", "a")))
+	})
+	t.Run("source set, dest empty: COMMENT set", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON TABLE "t" IS 'a';`, mkSC().diffTableComment(mkAlter("a", "")))
+	})
+	t.Run("source empty, dest set: COMMENT NULL", func(t *testing.T) {
+		xt.Equal(t, `COMMENT ON TABLE "t" IS NULL;`, mkSC().diffTableComment(mkAlter("", "a")))
+	})
+	t.Run("both empty: no sql", func(t *testing.T) {
+		xt.Equal(t, "", mkSC().diffTableComment(mkAlter("", "")))
+	})
+}
+
 func TestPostgresDialect_GenCommentColumnSQL(t *testing.T) {
 	d := &PostgresDialect{}
 

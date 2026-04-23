@@ -10,12 +10,13 @@ import (
 
 // MySchema table schema
 type MySchema struct {
-	Fields     xmap.Ordered[string, string] // Legacy: field name -> field definition string
-	FieldInfos map[string]*FieldInfo        // New: structured field information
-	IndexAll   map[string]*DbIndex
-	ForeignAll map[string]*DbIndex
-	Triggers   map[string]*DbTrigger // 由 TriggerEnumerator 注入；仅 PG
-	SchemaRaw  string
+	Fields       xmap.Ordered[string, string] // Legacy: field name -> field definition string
+	FieldInfos   map[string]*FieldInfo        // New: structured field information
+	IndexAll     map[string]*DbIndex
+	ForeignAll   map[string]*DbIndex
+	Triggers     map[string]*DbTrigger // 由 TriggerEnumerator 注入；仅 PG
+	TableComment string                // 由 TableCommentEnumerator 注入；仅 PG
+	SchemaRaw    string
 }
 
 func (mys *MySchema) String() string {

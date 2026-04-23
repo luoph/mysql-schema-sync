@@ -655,6 +655,32 @@ func (p *PostgresDialect) GetTableTriggers(db *sql.DB, tableName string) ([]*DbT
 	return result, rows.Err()
 }
 
+// GetTableComment implements TableCommentEnumerator: 读取 public schema 下表的
+// COMMENT ON TABLE 文本，空字符串表示无注释。
+func (p *PostgresDialect) GetTableComment(db *sql.DB, tableName string) (string, error) {
+	const q = `
+		SELECT COALESCE(d.description, '')
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+		WHERE n.nspname = 'public' AND c.relname = $1 AND c.relkind = 'r'`
+	var comment string
+	err := db.QueryRow(q, tableName).Scan(&comment)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return comment, err
+}
+
+// GenCommentTableSQL 生成 COMMENT ON TABLE 语句；空字符串时清除注释。
+func (p *PostgresDialect) GenCommentTableSQL(tableName, comment string) string {
+	if comment == "" {
+		return fmt.Sprintf(`COMMENT ON TABLE %q IS NULL;`, tableName)
+	}
+	escaped := strings.ReplaceAll(comment, "'", "''")
+	return fmt.Sprintf(`COMMENT ON TABLE %q IS '%s';`, tableName, escaped)
+}
+
 // GenDropTrigger 生成 DROP TRIGGER 语句；trigger 在 PostgreSQL 中与其宿主表绑定。
 func (p *PostgresDialect) GenDropTrigger(trg *DbTrigger) string {
 	return fmt.Sprintf(`DROP TRIGGER IF EXISTS %q ON %q;`, trg.Name, trg.Table)
