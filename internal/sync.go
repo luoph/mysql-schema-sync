@@ -119,7 +119,10 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 	sc.loadTableComment(alter.SchemaDiff.Source, sc.SourceDb, table)
 	sc.loadTableComment(alter.SchemaDiff.Dest, sc.DestDb, table)
 
-	if sSchema == dSchema {
+	// 使用 cleaned 串做全文早出对比：MySQL 的 AUTO_INCREMENT 会随数据行变化而
+	// 经常不同，原始串对比会误触发后续 diff 流程；cleaned 后只保留结构相关信息。
+	// len 判断仍用原始串，避免把"仅剥除空白产物的空串"误判为源/目标不存在。
+	if cleanSSchema == cleanDSchema {
 		return alter
 	}
 	if len(sSchema) == 0 {
@@ -150,7 +153,9 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 				alter.SQL = append(alter.SQL, te.GenAddTrigger(trg))
 			}
 		}
-		if tce, ok := d.(TableCommentEnumerator); ok && alter.SchemaDiff.Source.TableComment != "" {
+		// 仅非 inline dialect（PG）需要独立 emit COMMENT ON TABLE；
+		// MySQL 的注释已经通过 GenCreateTable 保留在 CREATE TABLE 子句里。
+		if tce, ok := d.(TableCommentEnumerator); ok && !tce.TableCommentInline() && alter.SchemaDiff.Source.TableComment != "" {
 			alter.SQL = append(alter.SQL, tce.GenCommentTableSQL(table, alter.SchemaDiff.Source.TableComment))
 		}
 		return alter

@@ -681,6 +681,10 @@ func (p *PostgresDialect) GenCommentTableSQL(tableName, comment string) string {
 	return fmt.Sprintf(`COMMENT ON TABLE %q IS '%s';`, tableName, escaped)
 }
 
+// TableCommentInline 返回 false：PostgreSQL 的 CREATE TABLE 不含表注释子句，
+// 必须用独立的 COMMENT ON TABLE 语句设置。
+func (p *PostgresDialect) TableCommentInline() bool { return false }
+
 // GenDropTrigger 生成 DROP TRIGGER 语句；trigger 在 PostgreSQL 中与其宿主表绑定。
 func (p *PostgresDialect) GenDropTrigger(trg *DbTrigger) string {
 	return fmt.Sprintf(`DROP TRIGGER IF EXISTS %q ON %q;`, trg.Name, trg.Table)

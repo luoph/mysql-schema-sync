@@ -21,11 +21,19 @@ type IndexCommenter interface {
 }
 
 // TableCommentEnumerator 是 Dialect 的可选能力：读取与生成表级注释 DDL。
-// MySQL 的表注释原本就嵌在 CREATE TABLE 的 COMMENT= 子句里，不需要独立处理，
-// 因此只有 PostgreSQL 需要实现这个能力。
+// 两种方言都需要实现，只是语义不同：
+//   - PostgreSQL 的表注释是独立的 COMMENT ON TABLE 语句，CREATE TABLE 不包含注释；
+//   - MySQL 的表注释由 CREATE TABLE 的 COMMENT='...' 子句内嵌，同时也支持
+//     ALTER TABLE ... COMMENT='...' 修改。
+//
+// TableCommentInline 区分这两种语义：返回 true 时，整表新建路径依赖
+// CreateTable DDL 自带的 COMMENT 子句，不再单独 emit；返回 false 时，
+// 必须追加独立的 COMMENT ON TABLE 语句。ALTER 路径两者都调用 GenCommentTableSQL
+// 输出表注释变更 DDL。
 type TableCommentEnumerator interface {
 	GetTableComment(db *sql.DB, tableName string) (string, error)
 	GenCommentTableSQL(tableName, comment string) string
+	TableCommentInline() bool
 }
 
 // DbTrigger 表示一个用户触发器。Definition 保存完整可执行的

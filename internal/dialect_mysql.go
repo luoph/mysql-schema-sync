@@ -136,9 +136,12 @@ func (m *MySQLDialect) GetTableFields(db *sql.DB, dbName, tableName string) (map
 
 // MySQL index parsing regex
 var (
-	mysqlIndexReg           = regexp.MustCompile(`^([A-Z]+\s)?KEY\s`)
-	mysqlForeignKeyReg      = regexp.MustCompile("^CONSTRAINT `(.+)` FOREIGN KEY.+ REFERENCES `(.+)` ")
-	mysqlCheckConstraintReg = regexp.MustCompile("^CONSTRAINT `([^`]+)` CHECK \\(\\((.+)\\)\\)")
+	mysqlIndexReg      = regexp.MustCompile(`^([A-Z]+\s)?KEY\s`)
+	mysqlForeignKeyReg = regexp.MustCompile("^CONSTRAINT `(.+)` FOREIGN KEY.+ REFERENCES `(.+)` ")
+	// MySQL 8.0+ 规范化输出 CHECK 时会包裹双层括号 "CHECK ((expr))"，但用户
+	// 自定义表达式也可能是单层 "CHECK (expr)"；放宽为只要求外层一对括号，
+	// 内部表达式可以包含任意括号嵌套。
+	mysqlCheckConstraintReg = regexp.MustCompile("^CONSTRAINT `([^`]+)` CHECK \\((.+)\\)$")
 )
 
 func (m *MySQLDialect) ParseSchema(schema string) *MySchema {
@@ -185,7 +188,13 @@ func (m *MySQLDialect) parseMySQLIndexLine(line string) *DbIndex {
 	}
 	if mysqlIndexReg.MatchString(line) {
 		arr := strings.Split(line, "`")
-		idx.IndexType = indexTypeIndex
+		// 识别 UNIQUE KEY 以便生成更准确的日志/调试输出；FULLTEXT / SPATIAL KEY
+		// 仍归入 indexTypeIndex（执行路径直接重放 idx.SQL，不受类型标签影响）。
+		if strings.HasPrefix(strings.ToUpper(line), "UNIQUE") {
+			idx.IndexType = indexTypeUnique
+		} else {
+			idx.IndexType = indexTypeIndex
+		}
 		idx.Name = arr[1]
 		return idx
 	}
@@ -205,7 +214,11 @@ func (m *MySQLDialect) parseMySQLIndexLine(line string) *DbIndex {
 }
 
 func (m *MySQLDialect) CleanTableSchema(schema string) string {
-	return strings.Split(schema, "ENGINE")[0]
+	// 只剥除 AUTO_INCREMENT=数字（受数据行计数驱动，与结构无关），保留 ENGINE /
+	// CHARSET / COLLATE / COMMENT / PARTITION BY 等尾部属性参与比对。当前仅实现
+	// TABLE COMMENT 的 ALTER 生成，其他属性差异不会被转换为 ALTER DDL，但仍能触发
+	// 结构化差异检测；未来补引擎/字符集同步时无需再改 CleanTableSchema。
+	return mysqlAutoIncrReg.ReplaceAllString(schema, " ")
 }
 
 func (m *MySQLDialect) Quote(name string) string {
@@ -273,6 +286,31 @@ func (m *MySQLDialect) GenDropTable(tableName string) string {
 func (m *MySQLDialect) GenCommentColumnSQL(tableName, colName, comment string) string {
 	return "" // MySQL handles comments inline in column definition
 }
+
+// GetTableComment implements TableCommentEnumerator: 从 information_schema
+// 读取表级 COMMENT 文本，空字符串表示无注释。
+func (m *MySQLDialect) GetTableComment(db *sql.DB, tableName string) (string, error) {
+	const q = `
+		SELECT COALESCE(TABLE_COMMENT, '')
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`
+	var comment string
+	err := db.QueryRow(q, tableName).Scan(&comment)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return comment, err
+}
+
+// GenCommentTableSQL 生成 ALTER TABLE ... COMMENT = '...' 语句；空字符串清除注释。
+func (m *MySQLDialect) GenCommentTableSQL(tableName, comment string) string {
+	escaped := strings.ReplaceAll(comment, "'", "''")
+	return fmt.Sprintf("ALTER TABLE `%s` COMMENT = '%s';", tableName, escaped)
+}
+
+// TableCommentInline 返回 true：MySQL 的 CREATE TABLE 已内嵌 COMMENT='...' 子句，
+// 整表新建时无需再单独 emit COMMENT 语句。
+func (m *MySQLDialect) TableCommentInline() bool { return true }
 
 func (m *MySQLDialect) WrapAlterSQL(tableName string, clauses []string, singleChange bool) []string {
 	if len(clauses) == 0 {
