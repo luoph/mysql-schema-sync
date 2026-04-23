@@ -61,7 +61,12 @@ func (ta *TableAlterData) String() string {
 		lines = append(lines, fmt.Sprintf("-- Comment: %s", comment))
 	}
 	if len(ta.SQL) > 0 {
+		// 单表粒度事务：PG 支持事务性 DDL，ALTER/CREATE INDEX/CREATE TRIGGER 等放在一起
+		// 可以做到"要么全成、要么全回滚"；MySQL 的 DDL 虽然隐式提交，但保留 BEGIN/COMMIT
+		// 既不影响执行，也让脚本语义统一、便于人工审查。
+		lines = append(lines, "BEGIN;")
 		lines = append(lines, strings.Join(ta.SQL, "\n"))
+		lines = append(lines, "COMMIT;")
 	}
 	return strings.Join(lines, "\n")
 }

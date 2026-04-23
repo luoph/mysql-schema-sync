@@ -5,8 +5,41 @@
 package internal
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestTableAlterData_StringWrapsTransaction(t *testing.T) {
+	t.Run("alter with SQL wraps BEGIN/COMMIT", func(t *testing.T) {
+		ta := &TableAlterData{
+			Table: "user",
+			Type:  alterTypeAlter,
+			SQL: []string{
+				`ALTER TABLE "user" ADD COLUMN "age" integer;`,
+				`CREATE INDEX idx_user_age ON public.user USING btree (age);`,
+			},
+		}
+		got := ta.String()
+		lines := strings.Split(got, "\n")
+		if len(lines) < 5 {
+			t.Fatalf("expected >=5 lines, got %d: %q", len(lines), got)
+		}
+		if lines[2] != "BEGIN;" {
+			t.Errorf("expected line[2]=BEGIN;, got %q", lines[2])
+		}
+		if lines[len(lines)-1] != "COMMIT;" {
+			t.Errorf("expected last line=COMMIT;, got %q", lines[len(lines)-1])
+		}
+	})
+
+	t.Run("no change keeps header only", func(t *testing.T) {
+		ta := &TableAlterData{Table: "user", Type: alterTypeNo}
+		got := ta.String()
+		if strings.Contains(got, "BEGIN;") || strings.Contains(got, "COMMIT;") {
+			t.Errorf("no-change table should not contain BEGIN/COMMIT, got %q", got)
+		}
+	})
+}
 
 func Test_fmtTableCreateSQL(t *testing.T) {
 	type args struct {

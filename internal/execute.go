@@ -88,33 +88,34 @@ runSync:
 			continue
 		}
 		log.Println("runSyncType:", typeName)
-		var sqls []string
-		var sts []*tableStatics
 		for _, sd := range sds {
+			var tableSqls []string
+			var sts []*tableStatics
 			for index := range sd.SQL {
 				sql := strings.TrimRight(sd.SQL[index], ";")
-				sqls = append(sqls, sql)
+				tableSqls = append(tableSqls, sql)
 
 				st := scs.newTableStatics(sd.Table, sd, index)
 				sts = append(sts, st)
 			}
-		}
 
-		sql := strings.Join(sqls, ";\n") + ";"
-		var ret error
-
-		if sc.Config.Sync {
-			ret = sc.SyncSQL4Dest(sql, sqls)
-			if ret == nil {
-				countSuccess++
-			} else {
-				countFailed++
+			var ret error
+			if sc.Config.Sync {
+				// 单表事务：本表相关的 ALTER/CREATE INDEX/CREATE TRIGGER 等语句作为
+				// 一个原子单元执行，任意一条失败则整表回滚，避免部分应用导致的
+				// 状态分裂。
+				ret = sc.SyncSQL4DestInTx(tableSqls)
+				if ret == nil {
+					countSuccess++
+				} else {
+					countFailed++
+				}
 			}
-		}
-		for _, st := range sts {
-			st.alterRet = ret
-			st.schemaAfter = sc.DestDb.GetTableSchema(st.table)
-			st.timer.stop()
+			for _, st := range sts {
+				st.alterRet = ret
+				st.schemaAfter = sc.DestDb.GetTableSchema(st.table)
+				st.timer.stop()
+			}
 		}
 	} // end for
 
@@ -134,25 +135,25 @@ runSync:
 	}
 }
 
-// runDDLBatch 打印并（cfg.Sync=true 时）向目标库执行一批独立 DDL 语句。
+// runDDLBatch 打印并（cfg.Sync=true 时）向目标库以单个事务执行一批独立 DDL 语句。
 // 用于库级对象同步（例如 CREATE OR REPLACE FUNCTION / DROP FUNCTION），
-// 每条语句独立执行，单条失败不影响其余语句。
+// 要么整批生效、要么整批回滚，与表级 SyncSQL4DestInTx 的语义一致。
 func runDDLBatch(sc *SchemaSync, cfg *Config, sqls []string, tag string) error {
 	if len(sqls) == 0 {
 		return nil
 	}
-	log.Printf("\n-- %s (%d) --\n", tag, len(sqls))
+	fmt.Printf("\n-- %s (%d) --\nBEGIN;\n", tag, len(sqls))
 	for _, s := range sqls {
 		fmt.Println(s)
 	}
+	fmt.Println("COMMIT;")
 	if !cfg.Sync {
 		return nil
 	}
-	var firstErr error
+	// 把带分号的 DDL 去掉尾分号再交给事务执行入口（它内部会统一补）。
+	trimmed := make([]string, 0, len(sqls))
 	for _, s := range sqls {
-		if err := sc.SyncSQL4Dest(s, []string{s}); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		trimmed = append(trimmed, strings.TrimRight(strings.TrimSpace(s), ";"))
 	}
-	return firstErr
+	return sc.SyncSQL4DestInTx(trimmed)
 }

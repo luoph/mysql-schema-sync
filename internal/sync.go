@@ -553,6 +553,49 @@ func classifySQL(sqls []string, alterClauses, standaloneSQL *[]string) {
 	}
 }
 
+// SyncSQL4DestInTx 在单个事务中顺序执行一批 DDL 语句。
+// 任意一条失败则整批回滚，避免部分成功造成的状态分裂。
+// PostgreSQL 原生支持事务性 DDL；MySQL 的 DDL 会隐式提交，BEGIN/COMMIT
+// 仅作为语义包装但不影响正确性。
+func (sc *SchemaSync) SyncSQL4DestInTx(sqls []string) error {
+	if len(sqls) == 0 {
+		return nil
+	}
+	for _, s := range sqls {
+		xcolor.Green(s)
+	}
+	log.Print("Exec_Tx_SQL:\n>>>>>>\n", xcolor.GreenString("%s", strings.Join(sqls, ";\n")+";"), "\n<<<<<<<<\n\n")
+
+	t := newMyTimer()
+	defer t.stop()
+
+	tx, err := sc.DestDb.sqlDB.Begin()
+	if err != nil {
+		log.Println("tx begin failed:", errString(err))
+		return err
+	}
+	for _, s := range sqls {
+		rows, qerr := tx.Query(s)
+		log.Println("query_one_tx:[", s, "]", errString(qerr))
+		if rows != nil {
+			_ = rows.Close()
+		}
+		if qerr != nil {
+			if rbErr := tx.Rollback(); rbErr != nil {
+				log.Println("tx rollback failed:", errString(rbErr))
+			}
+			log.Println("EXEC_TX_SQL_FAILED:", errString(qerr))
+			return qerr
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		log.Println("tx commit failed:", errString(err))
+		return err
+	}
+	log.Println("EXEC_TX_SQL_SUCCESS, used:", t.usedSecond())
+	return nil
+}
+
 // SyncSQL4Dest sync schema change
 func (sc *SchemaSync) SyncSQL4Dest(sqlStr string, sqls []string) error {
 	sqlStr = strings.TrimSpace(sqlStr)
