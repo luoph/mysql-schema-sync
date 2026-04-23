@@ -42,13 +42,17 @@ func (p *PostgresDialect) GetTableNames(db *sql.DB) ([]string, error) {
 }
 
 func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (string, error) {
-	// 1. Get columns
+	// 1. Get columns.
+	// pg_get_serial_sequence 用于识别 owned sequence：当列默认值为 nextval(<owned_seq>::regclass)
+	// 且 sequence 归属当前列时，该列本质上就是 serial/bigserial/smallserial，我们在输出时
+	// 折叠为 SERIAL 族类型并丢弃 DEFAULT，让目标库自动建 sequence，避免 relation not exists。
 	colQuery := `
 		SELECT
 			a.attname,
 			pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
 			a.attnotnull,
-			pg_get_expr(d.adbin, d.adrelid) AS default_value
+			pg_get_expr(d.adbin, d.adrelid) AS default_value,
+			pg_get_serial_sequence(quote_ident($1), a.attname) AS owned_seq
 		FROM pg_attribute a
 		LEFT JOIN pg_attrdef d ON a.attrelid = d.adrelid AND a.attnum = d.adnum
 		WHERE a.attrelid = $1::regclass
@@ -66,10 +70,18 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 	for colRows.Next() {
 		var colName, dataType string
 		var notNull bool
-		var defaultValue sql.NullString
-		if err := colRows.Scan(&colName, &dataType, &notNull, &defaultValue); err != nil {
+		var defaultValue, ownedSeq sql.NullString
+		if err := colRows.Scan(&colName, &dataType, &notNull, &defaultValue, &ownedSeq); err != nil {
 			return "", err
 		}
+
+		if ownedSeq.Valid && defaultValue.Valid && strings.Contains(defaultValue.String, "nextval(") {
+			if serialType, ok := pgSerialTypeFor(dataType); ok {
+				dataType = serialType
+				defaultValue = sql.NullString{}
+			}
+		}
+
 		def := fmt.Sprintf("  %q %s", colName, dataType)
 		if notNull {
 			def += " NOT NULL"
@@ -86,7 +98,10 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 		return "", fmt.Errorf("table %q not found or has no columns", tableName)
 	}
 
-	// 2. Get constraints (PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK)
+	// 2. Get constraints (PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK).
+	// 注意：PostgreSQL 17+ 把列级 NOT NULL 也作为命名约束（contype='n'）暴露在 pg_constraint 中，
+	// 与列定义里的 NOT NULL 语义重复，需排除，避免在 CREATE TABLE 中生成冗余/不兼容旧版本的
+	// "CONSTRAINT xxx NOT NULL col" 子句。
 	conQuery := `
 		SELECT
 			conname,
@@ -95,7 +110,7 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 		FROM pg_constraint c
 		JOIN pg_class t ON c.conrelid = t.oid
 		JOIN pg_namespace n ON t.relnamespace = n.oid
-		WHERE t.relname = $1 AND n.nspname = 'public'
+		WHERE t.relname = $1 AND n.nspname = 'public' AND c.contype <> 'n'
 		ORDER BY
 			CASE contype
 				WHEN 'p' THEN 1
@@ -290,6 +305,22 @@ func pgArrayType(udtName string) string {
 	base := strings.TrimPrefix(udtName, "_")
 	normalized := pgNormalizeTypeName(base)
 	return normalized + "[]"
+}
+
+// pgSerialTypeFor 将 owned-sequence 支撑的整型列折叠为 SERIAL 族伪类型。
+// 这样 CREATE TABLE 输出时 PostgreSQL 会自动按 "<table>_<column>_seq" 规则建 sequence，
+// 避免生成的 DDL 依赖尚不存在的 sequence。
+func pgSerialTypeFor(dataType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(dataType)) {
+	case "bigint", "int8":
+		return "bigserial", true
+	case "integer", "int", "int4":
+		return "serial", true
+	case "smallint", "int2":
+		return "smallserial", true
+	default:
+		return "", false
+	}
 }
 
 // pgCleanDefault strips PostgreSQL type casts from default values

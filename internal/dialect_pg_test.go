@@ -389,6 +389,34 @@ func TestPgNormalizeColumnType(t *testing.T) {
 	}
 }
 
+func TestPgSerialTypeFor(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    string
+		wantOK  bool
+	}{
+		{"bigint", "bigserial", true},
+		{"int8", "bigserial", true},
+		{"BIGINT", "bigserial", true},
+		{"  bigint  ", "bigserial", true},
+		{"integer", "serial", true},
+		{"int", "serial", true},
+		{"int4", "serial", true},
+		{"smallint", "smallserial", true},
+		{"int2", "smallserial", true},
+		{"text", "", false},
+		{"numeric(10,2)", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, ok := pgSerialTypeFor(tt.input)
+			xt.Equal(t, tt.wantOK, ok)
+			xt.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestPgCleanDefault(t *testing.T) {
 	tests := []struct {
 		input string
