@@ -230,12 +230,12 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				} else {
 					if sourceFieldInfo != nil && destFieldInfo != nil {
 						if d.FieldsEqual(sourceFieldInfo, destFieldInfo) {
-							// FieldsEqual 认为语义相等，进一步检查归一化后的 DDL 文本是否仍有差异
-							// 例如: 显式 CHARACTER SET vs 隐式继承表默认字符集
+							// FieldsEqual 认为语义相等，再用 normalizeColumnDDL 剥离 MySQL 的显示噪声
+							// （整数显示宽度、CHARACTER SET/COLLATE 按表默认值省略）后比较 DDL 文本，
+							// 仅当归一化后仍有差异才真实需要 CHANGE。
 							normalizedValue := normalizeColumnDDL(value)
 							normalizedDestValue := normalizeColumnDDL(destValue)
 							if normalizedValue != normalizedDestValue {
-								// 归一化后文本仍然不同，存在真实的 DDL 差异（如字符集表示不同）
 								alterSQL := d.GenChangeColumnText(fieldName, value)
 								if alterSQL != "" {
 									newClauses = append(newClauses, alterSQL)

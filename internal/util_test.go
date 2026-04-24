@@ -11,9 +11,9 @@ func TestNormalizeColumnDDL(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "varchar with charset - no change",
+			name:     "varchar with explicit charset+collate - stripped",
 			input:    "`name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
-			expected: "`name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+			expected: "`name` varchar(128) NOT NULL",
 		},
 		{
 			name:     "int(11) in DDL - normalized",
@@ -31,9 +31,24 @@ func TestNormalizeColumnDDL(t *testing.T) {
 			expected: "`deleted` tinyint NOT NULL DEFAULT '0'",
 		},
 		{
-			name:     "text type - no change",
+			name:     "text type with collate - stripped",
 			input:    "`content` text COLLATE utf8mb4_unicode_ci NOT NULL",
-			expected: "`content` text COLLATE utf8mb4_unicode_ci NOT NULL",
+			expected: "`content` text NOT NULL",
+		},
+		{
+			name:     "collate only vs no collate normalize to same",
+			input:    "`scene` varchar(32) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '场景标识'",
+			expected: "`scene` varchar(32) DEFAULT NULL COMMENT '场景标识'",
+		},
+		{
+			name:     "charset only, no collate",
+			input:    "`name` varchar(64) CHARACTER SET utf8mb4 NOT NULL",
+			expected: "`name` varchar(64) NOT NULL",
+		},
+		{
+			name:     "collate literal inside COMMENT is preserved",
+			input:    "`doc` text COLLATE utf8mb4_general_ci COMMENT 'use COLLATE utf8mb4_bin for CS compare'",
+			expected: "`doc` text COMMENT 'use COLLATE utf8mb4_bin for CS compare'",
 		},
 	}
 	for _, tt := range tests {

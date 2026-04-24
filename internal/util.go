@@ -84,12 +84,48 @@ func errString(err error) string {
 	return xcolor.RedString("%s", err.Error())
 }
 
-// normalizeColumnDDL normalizes a column DDL line by removing known false-positive differences.
-// Currently normalizes integer display width: int(11) → int, bigint(20) → bigint, etc.
-// This is used to detect real text differences that FieldsEqual might miss.
+// normalizeColumnDDL normalizes a column DDL line by removing known false-positive
+// differences. Used from the "semantically-equal" branch of column diffing to decide
+// whether any text-level difference remains that warrants a CHANGE.
+//
+// Normalizations applied:
+//  1. Integer display width: int(11) → int, bigint(20) → bigint 等（MySQL 8.0.19+ 兼容）。
+//  2. MySQL SHOW CREATE TABLE 对 `CHARACTER SET` / `COLLATE` 子句的"按表默认值省略"显示噪声
+//     —— 同一列在两侧若表默认字符集/排序不同，SHOW CREATE TABLE 是否输出这两个子句也会不
+//     同，但 INFORMATION_SCHEMA.COLUMNS 报告的有效字符集/排序两侧相同。
+//     调用方已通过 FieldsEqual 语义判等确认两侧字符集/排序等价，此处直接剥离子句以消除
+//     MySQL 的显示噪声，避免反复生成"不会收敛"的 CHANGE 语句。剥离只作用于 COMMENT
+//     子句之前的列属性段，以免误伤用户在列注释里提到的 "COLLATE" / "CHARACTER SET" 字面。
 func normalizeColumnDDL(ddl string) string {
-	re := regexp.MustCompile(`(?i)(tinyint|smallint|mediumint|int|bigint)\(\d+\)`)
-	return re.ReplaceAllString(ddl, "$1")
+	ddl = integerWidthReg.ReplaceAllString(ddl, "$1")
+	prefix, suffix := splitColumnCommentClause(ddl)
+	prefix = charsetClauseReg.ReplaceAllString(prefix, "")
+	prefix = collateClauseReg.ReplaceAllString(prefix, "")
+	prefix = whitespaceRunReg.ReplaceAllString(prefix, " ")
+	prefix = strings.TrimSpace(prefix)
+	if suffix == "" {
+		return prefix
+	}
+	return prefix + " " + suffix
+}
+
+var (
+	integerWidthReg  = regexp.MustCompile(`(?i)(tinyint|smallint|mediumint|int|bigint)\(\d+\)`)
+	charsetClauseReg = regexp.MustCompile(`(?i)\s+CHARACTER SET \w+`)
+	collateClauseReg = regexp.MustCompile(`(?i)\s+COLLATE \w+`)
+	whitespaceRunReg = regexp.MustCompile(`\s+`)
+	commentClauseReg = regexp.MustCompile(`(?i)\s+COMMENT '`)
+)
+
+// splitColumnCommentClause 把列 DDL 行拆成 "属性段" 和 "COMMENT '...'" 两部分。
+// 没有 COMMENT 子句时，suffix 为空。切点取首个 " COMMENT '" 出现处，以避免把
+// 用户在注释里写的 "COMMENT '...'" 当成真正的列注释。
+func splitColumnCommentClause(ddl string) (prefix, suffix string) {
+	loc := commentClauseReg.FindStringIndex(ddl)
+	if loc == nil {
+		return ddl, ""
+	}
+	return ddl[:loc[0]], strings.TrimLeft(ddl[loc[0]:], " \t")
 }
 
 // normalizeIntegerType removes display width from integer types for MySQL 8.0.19+ compatibility.
