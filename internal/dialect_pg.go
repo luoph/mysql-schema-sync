@@ -605,7 +605,7 @@ func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop b
 		// 旧路径下 defSQL 只是列表达式，则按 btree 拼接兼容。
 		upperDef := strings.ToUpper(strings.TrimSpace(defSQL))
 		if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
-			sqls = append(sqls, ensureSemicolon(defSQL))
+			sqls = append(sqls, ensureSemicolon(pgRewriteIndexTable(defSQL, tableName)))
 		} else {
 			sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
 		}
@@ -806,6 +806,24 @@ func (p *PostgresDialect) RoundTripCanonicalConstraint(db *sql.DB, tableName, co
 // pgIndexHeadReg 匹配 CREATE [UNIQUE] INDEX <name> ON <table> 的开头部分，
 // 用于把原 DDL 里的索引名与表名替换为 probe 占位，便于在 TEMP 表上重建。
 var pgIndexHeadReg = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+\S+\s+ON\s+\S+`)
+
+// pgIndexOnTableReg 抓取 head 前缀（含 "ON " 本身）和紧随其后的表名 token
+// （可能是 schema-qualified，比如 "public.user_chat"，也可能是裸名）。
+// 仅匹配第一处，仅作用于开头，不会误伤索引表达式内的子串。
+var pgIndexOnTableReg = regexp.MustCompile(`(?is)^(CREATE\s+(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+)\S+`)
+
+// pgRewriteIndexTable 将 pg_get_indexdef 返回的 head 中带 schema 限定的表名
+// 改写为不带 schema 的双引号包裹形式（"<tableName>"），使 CREATE INDEX 输出
+// 与 ALTER TABLE 的表名风格保持一致。不修改索引名、USING method 及 tail。
+func pgRewriteIndexTable(def, tableName string) string {
+	return pgIndexOnTableReg.ReplaceAllStringFunc(def, func(m string) string {
+		sub := pgIndexOnTableReg.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		return sub[1] + fmt.Sprintf("%q", tableName)
+	})
+}
 
 // pgIndexTailReg 抽取 "USING ..." 之后的所有内容（包含 method、列/表达式、可选 WHERE 子句），
 // 作为可直接比较的索引核心定义，忽略索引名/表名差异。

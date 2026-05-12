@@ -264,7 +264,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("user_agent_file", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_user_id ON public.user_agent_file USING btree (user_id);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX idx_user_id ON "user_agent_file" USING btree (user_id);`, sqls[0])
 	})
 
 	t.Run("add hnsw index with full def", func(t *testing.T) {
@@ -275,7 +275,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("note_embedding", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_hnsw ON public.note_embedding USING hnsw (embedding vector_cosine_ops);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX idx_hnsw ON "note_embedding" USING hnsw (embedding vector_cosine_ops);`, sqls[0])
 	})
 
 	t.Run("add partial index with WHERE clause", func(t *testing.T) {
@@ -286,7 +286,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("t", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_active ON public.t USING btree (user_id) WHERE (is_deleted = false);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX idx_active ON "t" USING btree (user_id) WHERE (is_deleted = false);`, sqls[0])
 	})
 
 	t.Run("full def index with drop first", func(t *testing.T) {
@@ -298,7 +298,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		sqls := d.GenAddIndex("t", idx, true)
 		xt.Equal(t, 2, len(sqls))
 		xt.Equal(t, `DROP INDEX "idx_user_id";`, sqls[0])
-		xt.Equal(t, `CREATE INDEX idx_user_id ON public.t USING btree (user_id);`, sqls[1])
+		xt.Equal(t, `CREATE INDEX idx_user_id ON "t" USING btree (user_id);`, sqls[1])
 	})
 
 	t.Run("legacy expression-only index def falls back to btree wrap", func(t *testing.T) {
