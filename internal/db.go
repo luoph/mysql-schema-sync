@@ -26,6 +26,10 @@ type FieldInfo struct {
 	ColumnType             string  `json:"column_type"`
 	ColumnComment          string  `json:"column_comment"`
 	Extra                  string  `json:"extra"`
+	// IdentityGeneration 仅 PostgreSQL 使用：当列是 GENERATED ... AS IDENTITY 标识列时，
+	// 取值为 "ALWAYS" 或 "BY DEFAULT"，空串表示非 identity 列。identity 与 serial(Extra=
+	// auto_increment) 互斥：identity 列没有 nextval 默认值。
+	IdentityGeneration string `json:"identity_generation"`
 }
 
 // needsQuotedDefault returns true if the field type requires quoted default values

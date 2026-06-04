@@ -47,13 +47,20 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 	// pg_get_serial_sequence 用于识别 owned sequence：当列默认值为 nextval(<owned_seq>::regclass)
 	// 且 sequence 归属当前列时，该列本质上就是 serial/bigserial/smallserial，我们在输出时
 	// 折叠为 SERIAL 族类型并丢弃 DEFAULT，让目标库自动建 sequence，避免 relation not exists。
+	// attidentity 用 CASE 直接翻译成与 information_schema.identity_generation 对齐的
+	// "ALWAYS" / "BY DEFAULT" / ""（避免把内部 "char" 类型 scan 进 Go string 的歧义）。
 	colQuery := `
 		SELECT
 			a.attname,
 			pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
 			a.attnotnull,
 			pg_get_expr(d.adbin, d.adrelid) AS default_value,
-			pg_get_serial_sequence(quote_ident($1), a.attname) AS owned_seq
+			pg_get_serial_sequence(quote_ident($1), a.attname) AS owned_seq,
+			CASE a.attidentity
+				WHEN 'a' THEN 'ALWAYS'
+				WHEN 'd' THEN 'BY DEFAULT'
+				ELSE ''
+			END AS identity_generation
 		FROM pg_attribute a
 		LEFT JOIN pg_attrdef d ON a.attrelid = d.adrelid AND a.attnum = d.adnum
 		WHERE a.attrelid = $1::regclass
@@ -69,14 +76,18 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 
 	var colDefs []string
 	for colRows.Next() {
-		var colName, dataType string
+		var colName, dataType, identityGeneration string
 		var notNull bool
 		var defaultValue, ownedSeq sql.NullString
-		if err := colRows.Scan(&colName, &dataType, &notNull, &defaultValue, &ownedSeq); err != nil {
+		if err := colRows.Scan(&colName, &dataType, &notNull, &defaultValue, &ownedSeq, &identityGeneration); err != nil {
 			return "", err
 		}
 
-		if ownedSeq.Valid && defaultValue.Valid && strings.Contains(defaultValue.String, "nextval(") {
+		// identity 列优先：GENERATED ... AS IDENTITY 隐含 NOT NULL 且无独立 DEFAULT。
+		// identity 与 serial 互斥（identity 列没有 nextval 默认值），所以仅在非 identity
+		// 时才做 serial 折叠。
+		identityClause := pgIdentityClause(identityGeneration)
+		if identityClause == "" && ownedSeq.Valid && defaultValue.Valid && strings.Contains(defaultValue.String, "nextval(") {
 			if serialType, ok := pgSerialTypeFor(dataType); ok {
 				dataType = serialType
 				defaultValue = sql.NullString{}
@@ -84,11 +95,15 @@ func (p *PostgresDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (
 		}
 
 		def := fmt.Sprintf("  %q %s", colName, dataType)
-		if notNull {
-			def += " NOT NULL"
-		}
-		if defaultValue.Valid {
-			def += " DEFAULT " + defaultValue.String
+		if identityClause != "" {
+			def += " " + identityClause
+		} else {
+			if notNull {
+				def += " NOT NULL"
+			}
+			if defaultValue.Valid {
+				def += " DEFAULT " + defaultValue.String
+			}
 		}
 		colDefs = append(colDefs, def)
 	}
@@ -166,7 +181,9 @@ func (p *PostgresDialect) GetTableFields(db *sql.DB, dbName, tableName string) (
 			c.udt_name,
 			COALESCE(
 				pgd.description, ''
-			) AS column_comment
+			) AS column_comment,
+			c.is_identity,
+			c.identity_generation
 		FROM information_schema.columns c
 		LEFT JOIN pg_catalog.pg_statio_all_tables st
 			ON c.table_schema = st.schemaname AND c.table_name = st.relname
@@ -187,12 +204,14 @@ func (p *PostgresDialect) GetTableFields(db *sql.DB, dbName, tableName string) (
 		field := &FieldInfo{}
 		var charMaxLen, numericPrecision, numericScale sql.NullInt64
 		var charset, collation, columnDefault sql.NullString
+		var isIdentity, identityGeneration sql.NullString
 		var udtName string
 		err := rows.Scan(
 			&field.ColumnName, &field.OrdinalPosition, &columnDefault,
 			&field.IsNullAble, &field.DataType, &charMaxLen,
 			&numericPrecision, &numericScale, &charset, &collation,
 			&udtName, &field.ColumnComment,
+			&isIdentity, &identityGeneration,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("pg scan field for %q: %w", tableName, err)
@@ -226,6 +245,12 @@ func (p *PostgresDialect) GetTableFields(db *sql.DB, dbName, tableName string) (
 		// Detect serial columns (nextval default)
 		if columnDefault.Valid && strings.Contains(columnDefault.String, "nextval(") {
 			field.Extra = "auto_increment"
+		}
+		// Detect identity columns (PG 10+ GENERATED ... AS IDENTITY)。identity 列的
+		// column_default 为 NULL，不会被上面的 serial 检测捕获，需要单独读取
+		// is_identity / identity_generation 才能在 FieldDef 里还原 IDENTITY 子句。
+		if isIdentity.Valid && strings.EqualFold(isIdentity.String, "YES") && identityGeneration.Valid {
+			field.IdentityGeneration = identityGeneration.String
 		}
 		fields[field.ColumnName] = field
 	}
@@ -517,6 +542,13 @@ func (p *PostgresDialect) FieldsEqual(a, b *FieldInfo) bool {
 }
 
 func (p *PostgresDialect) FieldDef(field *FieldInfo) string {
+	// identity 列（GENERATED ... AS IDENTITY）优先处理：该子句隐含 NOT NULL，且不接受独立
+	// DEFAULT；ADD COLUMN 时 PostgreSQL 会自动建 sequence 并把既有行回填为 1,2,3...，
+	// 这正是裸 "bigint NOT NULL"（在非空表上直接失败、且不会自增）所缺的能力。
+	if clause := pgIdentityClause(field.IdentityGeneration); clause != "" {
+		return fmt.Sprintf(`"%s" %s %s`, field.ColumnName, field.ColumnType, clause)
+	}
+
 	var parts []string
 
 	parts = append(parts, fmt.Sprintf(`"%s" %s`, field.ColumnName, field.ColumnType))
@@ -530,6 +562,21 @@ func (p *PostgresDialect) FieldDef(field *FieldInfo) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// pgIdentityClause 把 identity_generation（"ALWAYS" / "BY DEFAULT"）翻译为列定义里的
+// IDENTITY 子句；空串或未知值表示非 identity 列，返回空串。
+// GENERATED ... AS IDENTITY 隐含 NOT NULL 且不接受独立 DEFAULT，调用方命中非空返回值时
+// 应跳过 NOT NULL / DEFAULT 的拼接。
+func pgIdentityClause(generation string) string {
+	switch strings.ToUpper(strings.TrimSpace(generation)) {
+	case "ALWAYS":
+		return "GENERATED ALWAYS AS IDENTITY"
+	case "BY DEFAULT":
+		return "GENERATED BY DEFAULT AS IDENTITY"
+	default:
+		return ""
+	}
 }
 
 func (p *PostgresDialect) SupportsColumnOrder() bool { return false }
