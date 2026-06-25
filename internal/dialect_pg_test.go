@@ -645,11 +645,11 @@ func TestPostgresDialect_Misc(t *testing.T) {
 	})
 
 	t.Run("gen drop column", func(t *testing.T) {
-		xt.Equal(t, `DROP COLUMN "name"`, d.GenDropColumn("name"))
+		xt.Equal(t, []string{`DROP COLUMN "name"`}, d.GenDropColumn("user", "name"))
 	})
 
 	t.Run("gen add column", func(t *testing.T) {
-		xt.Equal(t, `ADD COLUMN "name" text NOT NULL`, d.GenAddColumn(`"name" text NOT NULL`, "", false, 0))
+		xt.Equal(t, []string{`ADD COLUMN "name" text NOT NULL`}, d.GenAddColumn("user", `"name" text NOT NULL`, "", false, 0))
 	})
 
 	t.Run("clean table schema is no-op", func(t *testing.T) {

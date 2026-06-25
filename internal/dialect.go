@@ -40,8 +40,8 @@ type Dialect interface {
 	// SupportsColumnOrder returns true if AFTER/FIRST is supported
 	SupportsColumnOrder() bool
 
-	// GenAddColumn generates ADD COLUMN clause
-	GenAddColumn(colDef, afterCol string, isFirst bool, fieldCount int) string
+	// GenAddColumn generates ADD COLUMN clause(s)
+	GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string
 
 	// GenChangeColumn generates column modification clauses (may return multiple for PG)
 	GenChangeColumn(fieldName string, src, dst *FieldInfo) []string
@@ -49,8 +49,8 @@ type Dialect interface {
 	// GenChangeColumnText generates column modification from raw text definition (legacy)
 	GenChangeColumnText(fieldName, colDef string) string
 
-	// GenDropColumn generates DROP COLUMN clause
-	GenDropColumn(colName string) string
+	// GenDropColumn generates DROP COLUMN clause(s)
+	GenDropColumn(table, colName string) []string
 
 	// GenAddIndex generates ADD INDEX clauses or standalone CREATE INDEX
 	GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string

@@ -286,7 +286,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				if sfi := sourceMyS.FieldInfos[fieldName]; sfi != nil {
 					colDef = d.FieldDef(sfi)
 				}
-				newClauses = append(newClauses, d.GenAddColumn(colDef, beforeFieldName, fieldCount == 0, fieldCount))
+				newClauses = append(newClauses, d.GenAddColumn(table, colDef, beforeFieldName, fieldCount == 0, fieldCount)...)
 				beforeFieldName = fieldName
 
 				if sfi := sourceMyS.FieldInfos[fieldName]; sfi != nil && sfi.ColumnComment != "" {
@@ -311,20 +311,22 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				log.Printf("ignore column %s.%s", table, fieldName)
 				continue
 			}
-			var alterSQL string
+			var newClauses []string
 			if destDt, has := destMyS.Fields.Get(fieldName); has {
 				if value != destDt {
-					alterSQL = d.GenChangeColumnText(fieldName, value)
+					if s := d.GenChangeColumnText(fieldName, value); s != "" {
+						newClauses = append(newClauses, s)
+					}
 				}
 				beforeFieldName = fieldName
 			} else {
-				alterSQL = d.GenAddColumn(value, beforeFieldName, fieldCount == 0, fieldCount)
+				newClauses = append(newClauses, d.GenAddColumn(table, value, beforeFieldName, fieldCount == 0, fieldCount)...)
 				beforeFieldName = fieldName
 			}
 
-			if len(alterSQL) != 0 {
-				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "alterSQL=", alterSQL)
-				alterClauses = append(alterClauses, alterSQL)
+			if len(newClauses) != 0 {
+				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "alterSQL=", newClauses)
+				alterClauses = append(alterClauses, newClauses...)
 			} else {
 				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "not change")
 			}
@@ -340,9 +342,9 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				continue
 			}
 			if _, has := sourceMyS.Fields.Get(name); !has {
-				alterSQL := d.GenDropColumn(name)
-				alterClauses = append(alterClauses, alterSQL)
-				log.Println("[Debug] check column.drop ", fmt.Sprintf("%s.%s", table, name), "alterSQL=", alterSQL)
+				dropClauses := d.GenDropColumn(table, name)
+				alterClauses = append(alterClauses, dropClauses...)
+				log.Println("[Debug] check column.drop ", fmt.Sprintf("%s.%s", table, name), "alterSQL=", dropClauses)
 			}
 		}
 	}

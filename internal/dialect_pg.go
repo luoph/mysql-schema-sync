@@ -581,8 +581,8 @@ func pgIdentityClause(generation string) string {
 
 func (p *PostgresDialect) SupportsColumnOrder() bool { return false }
 
-func (p *PostgresDialect) GenAddColumn(colDef, afterCol string, isFirst bool, fieldCount int) string {
-	return "ADD COLUMN " + colDef
+func (p *PostgresDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {
+	return []string{"ADD COLUMN " + colDef}
 }
 
 func (p *PostgresDialect) GenChangeColumn(fieldName string, src, dst *FieldInfo) []string {
@@ -626,8 +626,8 @@ func (p *PostgresDialect) GenChangeColumnText(fieldName, colDef string) string {
 	return ""
 }
 
-func (p *PostgresDialect) GenDropColumn(colName string) string {
-	return fmt.Sprintf(`DROP COLUMN "%s"`, colName)
+func (p *PostgresDialect) GenDropColumn(table, colName string) []string {
+	return []string{fmt.Sprintf(`DROP COLUMN "%s"`, colName)}
 }
 
 func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {

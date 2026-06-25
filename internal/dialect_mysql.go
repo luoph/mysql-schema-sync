@@ -235,14 +235,14 @@ func (m *MySQLDialect) FieldDef(field *FieldInfo) string {
 
 func (m *MySQLDialect) SupportsColumnOrder() bool { return true }
 
-func (m *MySQLDialect) GenAddColumn(colDef, afterCol string, isFirst bool, fieldCount int) string {
+func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {
 	if afterCol == "" {
 		if isFirst {
-			return "ADD " + colDef + " FIRST"
+			return []string{"ADD " + colDef + " FIRST"}
 		}
-		return "ADD " + colDef
+		return []string{"ADD " + colDef}
 	}
-	return fmt.Sprintf("ADD %s AFTER `%s`", colDef, afterCol)
+	return []string{fmt.Sprintf("ADD %s AFTER `%s`", colDef, afterCol)}
 }
 
 func (m *MySQLDialect) GenChangeColumn(fieldName string, src, dst *FieldInfo) []string {
@@ -253,8 +253,8 @@ func (m *MySQLDialect) GenChangeColumnText(fieldName, colDef string) string {
 	return fmt.Sprintf("CHANGE `%s` %s", fieldName, colDef)
 }
 
-func (m *MySQLDialect) GenDropColumn(colName string) string {
-	return fmt.Sprintf("drop `%s`", colName)
+func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
+	return []string{fmt.Sprintf("drop `%s`", colName)}
 }
 
 func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
