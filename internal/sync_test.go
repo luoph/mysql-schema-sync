@@ -103,3 +103,37 @@ func TestSchemaSync_getAlterDataBySchema(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifySQL(t *testing.T) {
+	t.Run("guard statements go standalone", func(t *testing.T) {
+		var alterClauses, standalone []string
+		classifySQL([]string{
+			"SET @__mss_sql = (SELECT 1)",
+			"PREPARE __mss_stmt FROM @__mss_sql",
+			"EXECUTE __mss_stmt",
+			"DEALLOCATE PREPARE __mss_stmt",
+		}, &alterClauses, &standalone)
+		xt.Equal(t, 0, len(alterClauses))
+		xt.Equal(t, 4, len(standalone))
+	})
+
+	t.Run("alter subclauses stay in alterClauses", func(t *testing.T) {
+		var alterClauses, standalone []string
+		classifySQL([]string{
+			`ADD COLUMN "name" text`,
+			`DROP COLUMN "old"`,
+		}, &alterClauses, &standalone)
+		xt.Equal(t, 2, len(alterClauses))
+		xt.Equal(t, 0, len(standalone))
+	})
+
+	t.Run("create and drop index go standalone", func(t *testing.T) {
+		var alterClauses, standalone []string
+		classifySQL([]string{
+			`CREATE INDEX IF NOT EXISTS "x" ON "t" USING btree (a);`,
+			`DROP INDEX IF EXISTS "x";`,
+		}, &alterClauses, &standalone)
+		xt.Equal(t, 0, len(alterClauses))
+		xt.Equal(t, 2, len(standalone))
+	})
+}

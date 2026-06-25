@@ -297,7 +297,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 			}
 
 			if len(newClauses) > 0 {
-				alterClauses = append(alterClauses, newClauses...)
+				classifySQL(newClauses, &alterClauses, &standaloneSQL)
 				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "alterSQL=", newClauses)
 			} else {
 				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "not change")
@@ -721,7 +721,12 @@ func classifySQL(sqls []string, alterClauses, standaloneSQL *[]string) {
 		upper := strings.ToUpper(strings.TrimSpace(s))
 		if strings.HasPrefix(upper, "CREATE ") ||
 			strings.HasPrefix(upper, "DROP INDEX") ||
-			strings.HasPrefix(upper, "COMMENT ON") {
+			strings.HasPrefix(upper, "DROP TABLE") ||
+			strings.HasPrefix(upper, "COMMENT ON") ||
+			strings.HasPrefix(upper, "SET ") ||
+			strings.HasPrefix(upper, "PREPARE ") ||
+			strings.HasPrefix(upper, "EXECUTE ") ||
+			strings.HasPrefix(upper, "DEALLOCATE ") {
 			*standaloneSQL = append(*standaloneSQL, s)
 		} else {
 			*alterClauses = append(*alterClauses, s)
