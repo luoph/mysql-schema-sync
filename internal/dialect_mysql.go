@@ -56,7 +56,7 @@ func (m *MySQLDialect) GetTableNames(db *sql.DB) ([]string, error) {
 }
 
 func (m *MySQLDialect) GetTableSchema(db *sql.DB, dbName, tableName string) (string, error) {
-	rs, err := db.Query(fmt.Sprintf("show create table `%s`", tableName))
+	rs, err := db.Query(fmt.Sprintf("show create table `%s`", mysqlQuoteIdent(tableName)))
 	if err != nil {
 		return "", err
 	}

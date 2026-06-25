@@ -51,7 +51,7 @@ func (f *FieldInfo) String() string {
 	var parts []string
 
 	// Column name and type
-	parts = append(parts, fmt.Sprintf("`%s` %s", f.ColumnName, f.ColumnType))
+	parts = append(parts, fmt.Sprintf("`%s` %s", mysqlQuoteIdent(f.ColumnName), f.ColumnType))
 
 	// CHARACTER SET and COLLATION (only for string types where these are non-nil)
 	if f.CharsetName != nil {

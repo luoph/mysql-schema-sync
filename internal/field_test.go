@@ -411,6 +411,21 @@ func TestFieldInfo_String(t *testing.T) {
 	}
 }
 
+// TestFieldInfo_String_BacktickEscape verifies that a column name containing a
+// backtick is properly escaped in FieldInfo.String() output (MySQL syntax).
+func TestFieldInfo_String_BacktickEscape(t *testing.T) {
+	f := &FieldInfo{
+		ColumnName: "we`ird",
+		ColumnType: "int",
+		IsNullAble: "YES",
+		DataType:   "int",
+	}
+	got := f.String()
+	// The column name backtick must be doubled: `we``ird`
+	want := "`we``ird` int NULL"
+	xt.Equal(t, want, got)
+}
+
 // Helper function to create string pointers
 func stringPtr(s string) *string {
 	return &s
