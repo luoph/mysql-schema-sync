@@ -43,4 +43,6 @@ func TestMySQL_NoBareDDL_AddColumns(t *testing.T) {
 	// 守卫块标志
 	xt.Equal(t, true, strings.Contains(out, "PREPARE __mss_stmt FROM @__mss_sql"))
 	xt.Equal(t, false, strings.Contains(out, "\nADD ")) // 不应再有裸 ADD 子句独占一行
+	// 守卫前的裸形式 ALTER TABLE `user` ADD `col` 不应再独占一行出现
+	xt.Equal(t, false, strings.Contains(out, "\nALTER TABLE "+"`"+"user"+"`"+" ADD "+"`"))
 }
