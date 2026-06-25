@@ -222,7 +222,7 @@ func (m *MySQLDialect) CleanTableSchema(schema string) string {
 }
 
 func (m *MySQLDialect) Quote(name string) string {
-	return "`" + name + "`"
+	return "`" + mysqlQuoteIdent(name) + "`"
 }
 
 func (m *MySQLDialect) FieldsEqual(a, b *FieldInfo) bool {
@@ -300,11 +300,11 @@ func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool
 }
 
 func (m *MySQLDialect) GenChangeColumn(fieldName string, src, dst *FieldInfo) []string {
-	return []string{fmt.Sprintf("CHANGE `%s` %s", fieldName, src.String())}
+	return []string{fmt.Sprintf("CHANGE `%s` %s", mysqlQuoteIdent(fieldName), src.String())}
 }
 
 func (m *MySQLDialect) GenChangeColumnText(fieldName, colDef string) string {
-	return fmt.Sprintf("CHANGE `%s` %s", fieldName, colDef)
+	return fmt.Sprintf("CHANGE `%s` %s", mysqlQuoteIdent(fieldName), colDef)
 }
 
 func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
@@ -394,7 +394,7 @@ func (m *MySQLDialect) GetTableComment(db *sql.DB, tableName string) (string, er
 // GenCommentTableSQL 生成 ALTER TABLE ... COMMENT = '...' 语句；空字符串清除注释。
 func (m *MySQLDialect) GenCommentTableSQL(tableName, comment string) string {
 	escaped := strings.ReplaceAll(comment, "'", "''")
-	return fmt.Sprintf("ALTER TABLE `%s` COMMENT = '%s';", tableName, escaped)
+	return fmt.Sprintf("ALTER TABLE `%s` COMMENT = '%s';", mysqlQuoteIdent(tableName), escaped)
 }
 
 // TableCommentInline 返回 true：MySQL 的 CREATE TABLE 已内嵌 COMMENT='...' 子句，
@@ -405,12 +405,13 @@ func (m *MySQLDialect) WrapAlterSQL(tableName string, clauses []string, singleCh
 	if len(clauses) == 0 {
 		return nil
 	}
+	escaped := mysqlQuoteIdent(tableName)
 	if singleChange {
 		var result []string
 		for _, clause := range clauses {
-			result = append(result, fmt.Sprintf("ALTER TABLE `%s`\n%s;", tableName, clause))
+			result = append(result, fmt.Sprintf("ALTER TABLE `%s`\n%s;", escaped, clause))
 		}
 		return result
 	}
-	return []string{fmt.Sprintf("ALTER TABLE `%s`\n%s;", tableName, strings.Join(clauses, ",\n"))}
+	return []string{fmt.Sprintf("ALTER TABLE `%s`\n%s;", escaped, strings.Join(clauses, ",\n"))}
 }

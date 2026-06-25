@@ -291,6 +291,46 @@ func TestMySQLDialect_GuardCheckConstraint(t *testing.T) {
 	})
 }
 
+func TestMySQLDialect_IdentEscaping(t *testing.T) {
+	d := &MySQLDialect{}
+
+	t.Run("Quote doubles backtick in name", func(t *testing.T) {
+		got := d.Quote("we`ird")
+		xt.Equal(t, "`we``ird`", got)
+	})
+
+	t.Run("WrapAlterSQL doubles backtick in tableName (singleChange=false)", func(t *testing.T) {
+		got := d.WrapAlterSQL("we`ird", []string{"ADD `x` int"}, false)
+		xt.Equal(t, 1, len(got))
+		xt.Equal(t, true, strings.Contains(got[0], "ALTER TABLE `we``ird`"))
+	})
+
+	t.Run("WrapAlterSQL doubles backtick in tableName (singleChange=true)", func(t *testing.T) {
+		got := d.WrapAlterSQL("we`ird", []string{"ADD `x` int"}, true)
+		xt.Equal(t, 1, len(got))
+		xt.Equal(t, true, strings.Contains(got[0], "ALTER TABLE `we``ird`"))
+	})
+
+	t.Run("GenCommentTableSQL doubles backtick in tableName", func(t *testing.T) {
+		got := d.GenCommentTableSQL("we`ird", "c")
+		xt.Equal(t, true, strings.Contains(got, "ALTER TABLE `we``ird`"))
+	})
+
+	t.Run("GenChangeColumnText doubles backtick in fieldName only", func(t *testing.T) {
+		got := d.GenChangeColumnText("we`ird", "`we`ird` int")
+		xt.Equal(t, true, strings.HasPrefix(got, "CHANGE `we``ird` "))
+		// colDef is passed through verbatim
+		xt.Equal(t, true, strings.HasSuffix(got, "`we`ird` int"))
+	})
+
+	t.Run("GenChangeColumn doubles backtick in fieldName", func(t *testing.T) {
+		fi := &FieldInfo{ColumnName: "we`ird", ColumnType: "int", IsNullAble: "NO"}
+		got := d.GenChangeColumn("we`ird", fi, fi)
+		xt.Equal(t, 1, len(got))
+		xt.Equal(t, true, strings.HasPrefix(got[0], "CHANGE `we``ird` "))
+	})
+}
+
 func TestMySQLDialect_GuardForeignKeys(t *testing.T) {
 	d := &MySQLDialect{}
 
