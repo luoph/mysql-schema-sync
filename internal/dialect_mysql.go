@@ -276,11 +276,16 @@ func (m *MySQLDialect) GenDropForeignKey(tableName string, idx *DbIndex) string 
 var mysqlAutoIncrReg = regexp.MustCompile(`\sAUTO_INCREMENT=[1-9]\d*\s`)
 
 func (m *MySQLDialect) GenCreateTable(schema string) string {
-	return mysqlAutoIncrReg.ReplaceAllString(schema, " ") + ";"
+	s := mysqlAutoIncrReg.ReplaceAllString(schema, " ")
+	if up := strings.ToUpper(strings.TrimSpace(s)); strings.HasPrefix(up, "CREATE TABLE ") && !strings.HasPrefix(up, "CREATE TABLE IF NOT EXISTS") {
+		trimmed := strings.TrimSpace(s)
+		s = "CREATE TABLE IF NOT EXISTS " + trimmed[len("CREATE TABLE "):]
+	}
+	return s + ";"
 }
 
 func (m *MySQLDialect) GenDropTable(tableName string) string {
-	return fmt.Sprintf("drop table `%s`;", tableName)
+	return fmt.Sprintf("DROP TABLE IF EXISTS `%s`;", tableName)
 }
 
 func (m *MySQLDialect) GenCommentColumnSQL(tableName, colName, comment string) string {

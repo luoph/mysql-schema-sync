@@ -94,3 +94,18 @@ func TestMySQLDialect_GenCommentTableSQL(t *testing.T) {
 		xt.Equal(t, true, d.TableCommentInline())
 	})
 }
+
+func TestMySQLDialect_Idempotent_Table(t *testing.T) {
+	d := &MySQLDialect{}
+
+	t.Run("create table if not exists keeps auto_increment strip", func(t *testing.T) {
+		in := "CREATE TABLE `t` (\n  `id` bigint NOT NULL\n) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4"
+		out := d.GenCreateTable(in)
+		xt.Equal(t, true, strings.HasPrefix(out, "CREATE TABLE IF NOT EXISTS `t`"))
+		xt.Equal(t, false, strings.Contains(out, "AUTO_INCREMENT=9"))
+		xt.Equal(t, true, strings.HasSuffix(out, ";"))
+	})
+	t.Run("drop table if exists", func(t *testing.T) {
+		xt.Equal(t, "DROP TABLE IF EXISTS `user`;", d.GenDropTable("user"))
+	})
+}
