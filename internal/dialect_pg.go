@@ -637,16 +637,12 @@ func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop b
 	// DROP CONSTRAINT IF EXISTS 兜底幂等；普通索引用 CREATE INDEX IF NOT EXISTS。
 	switch idx.IndexType {
 	case indexTypePrimary, indexTypeUnique, checkConstraint:
-		if dropSQL := p.GenDropIndex(tableName, idx); dropSQL != "" {
-			sqls = append(sqls, dropSQL)
-		}
+		sqls = append(sqls, p.GenDropIndex(tableName, idx)...)
 		defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	case indexTypeIndex:
 		if needDrop {
-			if dropSQL := p.GenDropIndex(tableName, idx); dropSQL != "" {
-				sqls = append(sqls, dropSQL)
-			}
+			sqls = append(sqls, p.GenDropIndex(tableName, idx)...)
 		}
 		defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 		upperDef := strings.ToUpper(strings.TrimSpace(defSQL))
@@ -1149,27 +1145,39 @@ func (p *PostgresDialect) GenCommentIndexSQL(indexName, comment string) string {
 	return fmt.Sprintf(`COMMENT ON INDEX %q IS '%s';`, indexName, escaped)
 }
 
-func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {
+func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) []string {
+	var s string
 	switch idx.IndexType {
 	case indexTypePrimary, checkConstraint, indexTypeUnique:
-		return fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)
+		s = fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)
 	case indexTypeIndex:
-		return fmt.Sprintf(`DROP INDEX IF EXISTS "%s";`, idx.Name)
+		s = fmt.Sprintf(`DROP INDEX IF EXISTS "%s";`, idx.Name)
 	}
-	return ""
+	if s != "" {
+		return []string{s}
+	}
+	return nil
+}
+
+func (p *PostgresDialect) GenDropIndexMulti(tableName string, idx *DbIndex) []string {
+	return p.GenDropIndex(tableName, idx)
 }
 
 func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
 	// FK 同约束：总是前置 DROP CONSTRAINT IF EXISTS 兜底幂等（needDrop 参数不再影响是否 drop）。
-	sqls = append(sqls, p.GenDropForeignKey(tableName, idx))
+	sqls = append(sqls, p.GenDropForeignKey(tableName, idx)...)
 	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 	sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	return sqls
 }
 
-func (p *PostgresDialect) GenDropForeignKey(tableName string, idx *DbIndex) string {
-	return fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)
+func (p *PostgresDialect) GenDropForeignKey(tableName string, idx *DbIndex) []string {
+	return []string{fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)}
+}
+
+func (p *PostgresDialect) GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string {
+	return p.GenDropForeignKey(tableName, idx)
 }
 
 func (p *PostgresDialect) GenCreateTable(schema string) string {

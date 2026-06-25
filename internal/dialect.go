@@ -55,14 +55,20 @@ type Dialect interface {
 	// GenAddIndex generates ADD INDEX clauses or standalone CREATE INDEX
 	GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string
 
-	// GenDropIndex generates DROP INDEX clause or standalone DROP INDEX
-	GenDropIndex(tableName string, idx *DbIndex) string
+	// GenDropIndex generates DROP INDEX clause(s) (PG: single-element, MySQL: guard block)
+	GenDropIndex(tableName string, idx *DbIndex) []string
 
 	// GenAddForeignKey generates ADD FOREIGN KEY clauses
 	GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string
 
-	// GenDropForeignKey generates DROP FOREIGN KEY/CONSTRAINT clause
-	GenDropForeignKey(tableName string, idx *DbIndex) string
+	// GenDropForeignKey generates DROP FOREIGN KEY/CONSTRAINT clause(s) (PG: single-element, MySQL: guard block)
+	GenDropForeignKey(tableName string, idx *DbIndex) []string
+
+	// GenDropIndexMulti returns idempotent drop-index statement group (PG: single-element, MySQL: guard block)
+	GenDropIndexMulti(tableName string, idx *DbIndex) []string
+
+	// GenDropForeignKeyMulti returns idempotent drop-fk statement group (PG: single-element, MySQL: guard block)
+	GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string
 
 	// GenCreateTable formats CREATE TABLE SQL for execution
 	GenCreateTable(schema string) string

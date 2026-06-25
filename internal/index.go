@@ -76,6 +76,35 @@ func (idx *DbIndex) alterDropSQL() string {
 	return ""
 }
 
+// mysqlAddBody 返回 ADD 子句体（不含 "ALTER TABLE `t` " 前缀）。
+func (idx *DbIndex) mysqlAddBody() string {
+	return "ADD " + idx.SQL
+}
+
+// mysqlDropBody 返回 DROP 子句体（不含 "ALTER TABLE `t` " 前缀）。
+func (idx *DbIndex) mysqlDropBody() string {
+	switch idx.IndexType {
+	case indexTypePrimary:
+		return "DROP PRIMARY KEY"
+	case indexTypeIndex, indexTypeUnique:
+		return fmt.Sprintf("DROP INDEX `%s`", idx.Name)
+	case indexTypeForeignKey:
+		return fmt.Sprintf("DROP FOREIGN KEY `%s`", idx.Name)
+	case checkConstraint:
+		return fmt.Sprintf("DROP CHECK `%s`", idx.Name)
+	}
+	return ""
+}
+
+// mysqlIndexProbeName 返回 information_schema.STATISTICS.INDEX_NAME 的探测值：
+// 主键固定为 'PRIMARY'，其余用索引名。
+func (idx *DbIndex) mysqlIndexProbeName() string {
+	if idx.IndexType == indexTypePrimary {
+		return "PRIMARY"
+	}
+	return idx.Name
+}
+
 func (idx *DbIndex) addRelationTable(table string) {
 	table = strings.TrimSpace(table)
 	if len(table) != 0 {

@@ -308,19 +308,53 @@ func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
 }
 
 func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
-	return idx.alterAddSQL(needDrop)
+	var sqls []string
+	if needDrop {
+		sqls = append(sqls, m.GenDropIndexGuard(tableName, idx)...)
+	}
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlAddBody())
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND INDEX_NAME='%s'", tableName, idx.mysqlIndexProbeName())
+	return append(sqls, mysqlGuard("information_schema.STATISTICS", where, ddl, false)...)
 }
 
-func (m *MySQLDialect) GenDropIndex(tableName string, idx *DbIndex) string {
-	return idx.alterDropSQL()
+// GenDropIndexGuard 返回带存在性守卫的 DROP INDEX/PRIMARY KEY 语句组（4条）。
+func (m *MySQLDialect) GenDropIndexGuard(tableName string, idx *DbIndex) []string {
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlDropBody())
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND INDEX_NAME='%s'", tableName, idx.mysqlIndexProbeName())
+	return mysqlGuard("information_schema.STATISTICS", where, ddl, true)
+}
+
+func (m *MySQLDialect) GenDropIndex(tableName string, idx *DbIndex) []string {
+	return m.GenDropIndexGuard(tableName, idx)
+}
+
+func (m *MySQLDialect) GenDropIndexMulti(tableName string, idx *DbIndex) []string {
+	return m.GenDropIndexGuard(tableName, idx)
 }
 
 func (m *MySQLDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
-	return idx.alterAddSQL(needDrop)
+	var sqls []string
+	if needDrop {
+		sqls = append(sqls, m.GenDropForeignKeyGuard(tableName, idx)...)
+	}
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlAddBody())
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND CONSTRAINT_NAME='%s' AND CONSTRAINT_TYPE='FOREIGN KEY'", tableName, idx.Name)
+	return append(sqls, mysqlGuard("information_schema.TABLE_CONSTRAINTS", where, ddl, false)...)
 }
 
-func (m *MySQLDialect) GenDropForeignKey(tableName string, idx *DbIndex) string {
-	return idx.alterDropSQL()
+// GenDropForeignKeyGuard 返回带存在性守卫的 DROP FOREIGN KEY 语句组（4条）。
+func (m *MySQLDialect) GenDropForeignKeyGuard(tableName string, idx *DbIndex) []string {
+	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", tableName, idx.Name)
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND CONSTRAINT_NAME='%s' AND CONSTRAINT_TYPE='FOREIGN KEY'", tableName, idx.Name)
+	return mysqlGuard("information_schema.TABLE_CONSTRAINTS", where, ddl, true)
+}
+
+func (m *MySQLDialect) GenDropForeignKey(tableName string, idx *DbIndex) []string {
+	return m.GenDropForeignKeyGuard(tableName, idx)
+}
+
+func (m *MySQLDialect) GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string {
+	return m.GenDropForeignKeyGuard(tableName, idx)
 }
 
 var mysqlAutoIncrReg = regexp.MustCompile(`\sAUTO_INCREMENT=[1-9]\d*\s`)

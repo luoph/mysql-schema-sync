@@ -286,8 +286,8 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 
 	t.Run("drop primary key", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test"}
-		sql := d.GenDropIndex("test", idx)
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sql)
+		sqls := d.GenDropIndex("test", idx)
+		xt.Equal(t, []string{`DROP CONSTRAINT IF EXISTS "pk_test"`}, sqls)
 	})
 
 	t.Run("add unique constraint", func(t *testing.T) {
@@ -496,8 +496,8 @@ func TestPostgresDialect_GenForeignKey(t *testing.T) {
 
 	t.Run("drop foreign key", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user"}
-		sql := d.GenDropForeignKey("orders", idx)
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sql)
+		sqls := d.GenDropForeignKey("orders", idx)
+		xt.Equal(t, []string{`DROP CONSTRAINT IF EXISTS "fk_user"`}, sqls)
 	})
 
 	t.Run("add with drop", func(t *testing.T) {
@@ -736,15 +736,15 @@ func TestPostgresDialect_Idempotent_DropSide(t *testing.T) {
 	})
 	t.Run("drop index if exists", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_a"}
-		xt.Equal(t, `DROP INDEX IF EXISTS "idx_a";`, d.GenDropIndex("t", idx))
+		xt.Equal(t, []string{`DROP INDEX IF EXISTS "idx_a";`}, d.GenDropIndex("t", idx))
 	})
 	t.Run("drop constraint if exists", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test"}
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, d.GenDropIndex("t", idx))
+		xt.Equal(t, []string{`DROP CONSTRAINT IF EXISTS "pk_test"`}, d.GenDropIndex("t", idx))
 	})
 	t.Run("drop foreign key if exists", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user"}
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, d.GenDropForeignKey("orders", idx))
+		xt.Equal(t, []string{`DROP CONSTRAINT IF EXISTS "fk_user"`}, d.GenDropForeignKey("orders", idx))
 	})
 }
 

@@ -202,3 +202,64 @@ func TestMySQLDialect_Idempotent_Table(t *testing.T) {
 		xt.Equal(t, "DROP TABLE IF EXISTS `user`;", d.GenDropTable("user"))
 	})
 }
+
+func TestMySQLDialect_GuardIndexes(t *testing.T) {
+	d := &MySQLDialect{}
+
+	t.Run("add unique index guarded", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeUnique, Name: "uk_email", SQL: "UNIQUE KEY `uk_email` (`email`)"}
+		got := d.GenAddIndex("user", idx, false)
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `user` ADD UNIQUE KEY `uk_email` (`email`)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND INDEX_NAME='uk_email');",
+			got[0])
+	})
+	t.Run("drop index guarded", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_code"}
+		got := d.GenDropIndex("user", idx)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `user` DROP INDEX `idx_code`', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND INDEX_NAME='idx_code');",
+			got[0])
+	})
+	t.Run("add primary key probes PRIMARY", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypePrimary, Name: "PRIMARY KEY", SQL: "PRIMARY KEY (`id`)"}
+		got := d.GenAddIndex("user", idx, false)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `user` ADD PRIMARY KEY (`id`)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND INDEX_NAME='PRIMARY');",
+			got[0])
+	})
+	t.Run("drop primary key probes PRIMARY", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypePrimary, Name: "PRIMARY KEY"}
+		got := d.GenDropIndex("user", idx)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `user` DROP PRIMARY KEY', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND INDEX_NAME='PRIMARY');",
+			got[0])
+	})
+	t.Run("add index with drop prepends drop guard", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeUnique, Name: "uk_email", SQL: "UNIQUE KEY `uk_email` (`email`)"}
+		got := d.GenAddIndex("user", idx, true)
+		xt.Equal(t, 8, len(got)) // drop 守卫 4 + add 守卫 4
+		xt.Equal(t, true, strings.Contains(got[0], "IF(COUNT(*)>0"))
+		xt.Equal(t, true, strings.Contains(got[4], "IF(COUNT(*)=0"))
+	})
+}
+
+func TestMySQLDialect_GuardForeignKeys(t *testing.T) {
+	d := &MySQLDialect{}
+
+	t.Run("add fk guarded", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user",
+			SQL: "CONSTRAINT `fk_user` FOREIGN KEY (`uid`) REFERENCES `user` (`id`)"}
+		got := d.GenAddForeignKey("orders", idx, false)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `orders` ADD CONSTRAINT `fk_user` FOREIGN KEY (`uid`) REFERENCES `user` (`id`)', 'SELECT 1') FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND CONSTRAINT_NAME='fk_user' AND CONSTRAINT_TYPE='FOREIGN KEY');",
+			got[0])
+	})
+	t.Run("drop fk guarded", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user"}
+		got := d.GenDropForeignKey("orders", idx)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `orders` DROP FOREIGN KEY `fk_user`', 'SELECT 1') FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND CONSTRAINT_NAME='fk_user' AND CONSTRAINT_TYPE='FOREIGN KEY');",
+			got[0])
+	})
+}
