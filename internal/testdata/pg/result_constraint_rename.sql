@@ -2,5 +2,5 @@
 -- Type : alter
 BEGIN;
 ALTER TABLE "user_audio" ADD CONSTRAINT "user_audio_user_id_key" UNIQUE ("user_id");
-ALTER TABLE "user_audio" DROP CONSTRAINT "user_audio_uid_uniq";
+ALTER TABLE "user_audio" DROP CONSTRAINT IF EXISTS "user_audio_uid_uniq";
 COMMIT;

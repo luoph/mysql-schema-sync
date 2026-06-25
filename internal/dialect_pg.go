@@ -582,7 +582,7 @@ func pgIdentityClause(generation string) string {
 func (p *PostgresDialect) SupportsColumnOrder() bool { return false }
 
 func (p *PostgresDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {
-	return []string{"ADD COLUMN " + colDef}
+	return []string{"ADD COLUMN IF NOT EXISTS " + colDef}
 }
 
 func (p *PostgresDialect) GenChangeColumn(fieldName string, src, dst *FieldInfo) []string {
@@ -627,7 +627,7 @@ func (p *PostgresDialect) GenChangeColumnText(fieldName, colDef string) string {
 }
 
 func (p *PostgresDialect) GenDropColumn(table, colName string) []string {
-	return []string{fmt.Sprintf(`DROP COLUMN "%s"`, colName)}
+	return []string{fmt.Sprintf(`DROP COLUMN IF EXISTS "%s"`, colName)}
 }
 
 func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
@@ -1139,9 +1139,9 @@ func (p *PostgresDialect) GenCommentIndexSQL(indexName, comment string) string {
 func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {
 	switch idx.IndexType {
 	case indexTypePrimary, checkConstraint, indexTypeUnique:
-		return fmt.Sprintf(`DROP CONSTRAINT "%s"`, idx.Name)
+		return fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)
 	case indexTypeIndex:
-		return fmt.Sprintf(`DROP INDEX "%s";`, idx.Name)
+		return fmt.Sprintf(`DROP INDEX IF EXISTS "%s";`, idx.Name)
 	}
 	return ""
 }
@@ -1158,15 +1158,19 @@ func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needD
 }
 
 func (p *PostgresDialect) GenDropForeignKey(tableName string, idx *DbIndex) string {
-	return fmt.Sprintf(`DROP CONSTRAINT "%s"`, idx.Name)
+	return fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)
 }
 
 func (p *PostgresDialect) GenCreateTable(schema string) string {
-	return schema + ";"
+	s := strings.TrimSpace(schema)
+	if up := strings.ToUpper(s); strings.HasPrefix(up, "CREATE TABLE ") && !strings.HasPrefix(up, "CREATE TABLE IF NOT EXISTS") {
+		s = "CREATE TABLE IF NOT EXISTS " + s[len("CREATE TABLE "):]
+	}
+	return s + ";"
 }
 
 func (p *PostgresDialect) GenDropTable(tableName string) string {
-	return fmt.Sprintf(`DROP TABLE "%s";`, tableName)
+	return fmt.Sprintf(`DROP TABLE IF EXISTS "%s";`, tableName)
 }
 
 func (p *PostgresDialect) GenCommentColumnSQL(tableName, colName, comment string) string {
