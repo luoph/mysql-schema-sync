@@ -271,7 +271,12 @@ func mysqlColumnName(colDef string) string {
 			return s[1 : i+1]
 		}
 	}
-	return s
+	// 当无反引号时，取首个空白符分隔 token，并去除反引号
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "`")
 }
 
 func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {

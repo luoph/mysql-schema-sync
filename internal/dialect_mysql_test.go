@@ -101,6 +101,39 @@ func TestMySQLEscapeSQLLiteral(t *testing.T) {
 	xt.Equal(t, `\\''`, mysqlEscapeSQLLiteral(`\'`))
 }
 
+func TestMySQLColumnName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "`age` int NOT NULL",
+			want:  "age",
+		},
+		{
+			input: "`register_time` timestamp NOT NULL",
+			want:  "register_time",
+		},
+		{
+			input: "age int NOT NULL",
+			want:  "age",
+		},
+		{
+			input: "`id`",
+			want:  "id",
+		},
+		{
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		got := mysqlColumnName(tt.input)
+		xt.Equal(t, tt.want, got)
+	}
+}
+
 func TestMySQLGuard(t *testing.T) {
 	t.Run("add semantics uses COUNT=0", func(t *testing.T) {
 		got := mysqlGuard("information_schema.COLUMNS",
@@ -121,6 +154,12 @@ func TestMySQLGuard(t *testing.T) {
 		xt.Equal(t,
 			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `t` DROP INDEX `idx`', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND INDEX_NAME='idx');",
 			got[0])
+	})
+	t.Run("escapes quotes in ddl", func(t *testing.T) {
+		got := mysqlGuard("information_schema.COLUMNS",
+			"TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND COLUMN_NAME='c'",
+			"ALTER TABLE `t` ADD `c` varchar(10) DEFAULT 'x'", false)
+		xt.Equal(t, true, strings.Contains(got[0], "DEFAULT ''x''"))
 	})
 }
 
