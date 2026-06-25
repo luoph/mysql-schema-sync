@@ -862,9 +862,11 @@ var pgIndexOnTableReg = regexp.MustCompile(`(?is)^(CREATE\s+(?:UNIQUE\s+)?INDEX\
 // 已含则原样返回。仅作用于语句开头，不影响 USING method / 列表达式 / WHERE。
 var pgCreateIndexHeadReg = regexp.MustCompile(`(?i)^(CREATE\s+(?:UNIQUE\s+)?INDEX)\s+`)
 
+var pgCreateIndexAlreadyReg = regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS`)
+
 func pgIndexIfNotExists(def string) string {
 	s := strings.TrimSpace(def)
-	if regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS`).MatchString(s) {
+	if pgCreateIndexAlreadyReg.MatchString(s) {
 		return s
 	}
 	return pgCreateIndexHeadReg.ReplaceAllString(s, "$1 IF NOT EXISTS ")
