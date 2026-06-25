@@ -33,47 +33,9 @@ const (
 	checkConstraint     indexType = "CHECK"
 )
 
-func (idx *DbIndex) alterAddSQL(drop bool) []string {
-	var alterSQL []string
-	if drop {
-		dropSQL := idx.alterDropSQL()
-		if len(dropSQL) != 0 {
-			alterSQL = append(alterSQL, dropSQL)
-		}
-	}
-
-	switch idx.IndexType {
-	case indexTypePrimary:
-		alterSQL = append(alterSQL, "ADD "+idx.SQL)
-	case indexTypeIndex, indexTypeUnique, indexTypeForeignKey:
-		alterSQL = append(alterSQL, fmt.Sprintf("ADD %s", idx.SQL))
-	case checkConstraint:
-		alterSQL = append(alterSQL, fmt.Sprintf("ADD %s", idx.SQL))
-	default:
-		log.Fatalln("unknown indexType", idx.IndexType)
-	}
-	return alterSQL
-}
-
 func (idx *DbIndex) String() string {
 	bs, _ := json.MarshalIndent(idx, "  ", " ")
 	return string(bs)
-}
-
-func (idx *DbIndex) alterDropSQL() string {
-	switch idx.IndexType {
-	case indexTypePrimary:
-		return "DROP PRIMARY KEY"
-	case indexTypeIndex, indexTypeUnique:
-		return fmt.Sprintf("DROP INDEX `%s`", idx.Name)
-	case indexTypeForeignKey:
-		return fmt.Sprintf("DROP FOREIGN KEY `%s`", idx.Name)
-	case checkConstraint:
-		return fmt.Sprintf("DROP CHECK `%s`", idx.Name)
-	default:
-		log.Fatalln("unknown indexType", idx.IndexType)
-	}
-	return ""
 }
 
 // mysqlAddBody 返回 ADD 子句体（不含 "ALTER TABLE `t` " 前缀）。
