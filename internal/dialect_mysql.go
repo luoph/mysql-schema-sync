@@ -328,10 +328,6 @@ func (m *MySQLDialect) GenDropIndex(tableName string, idx *DbIndex) []string {
 	return m.GenDropIndexGuard(tableName, idx)
 }
 
-func (m *MySQLDialect) GenDropIndexMulti(tableName string, idx *DbIndex) []string {
-	return m.GenDropIndexGuard(tableName, idx)
-}
-
 func (m *MySQLDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
 	if needDrop {
@@ -350,10 +346,6 @@ func (m *MySQLDialect) GenDropForeignKeyGuard(tableName string, idx *DbIndex) []
 }
 
 func (m *MySQLDialect) GenDropForeignKey(tableName string, idx *DbIndex) []string {
-	return m.GenDropForeignKeyGuard(tableName, idx)
-}
-
-func (m *MySQLDialect) GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string {
 	return m.GenDropForeignKeyGuard(tableName, idx)
 }
 

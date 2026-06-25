@@ -64,12 +64,6 @@ type Dialect interface {
 	// GenDropForeignKey generates DROP FOREIGN KEY/CONSTRAINT clause(s) (PG: single-element, MySQL: guard block)
 	GenDropForeignKey(tableName string, idx *DbIndex) []string
 
-	// GenDropIndexMulti returns idempotent drop-index statement group (PG: single-element, MySQL: guard block)
-	GenDropIndexMulti(tableName string, idx *DbIndex) []string
-
-	// GenDropForeignKeyMulti returns idempotent drop-fk statement group (PG: single-element, MySQL: guard block)
-	GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string
-
 	// GenCreateTable formats CREATE TABLE SQL for execution
 	GenCreateTable(schema string) string
 

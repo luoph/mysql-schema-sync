@@ -406,7 +406,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 				continue
 			}
 			if _, has := sourceMyS.IndexAll[indexName]; !has {
-				dropSQLs := d.GenDropIndexMulti(table, dIdx)
+				dropSQLs := d.GenDropIndex(table, dIdx)
 				if len(dropSQLs) > 0 {
 					classifySQL(dropSQLs, &alterClauses, &standaloneSQL)
 					log.Println("[Debug] check index.drop ", fmt.Sprintf("%s.%s", table, indexName), "sql=", dropSQLs)
@@ -447,7 +447,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 			}
 			if _, has := sourceMyS.ForeignAll[foreignName]; !has {
 				log.Println("[Debug] foreignName --->[", fmt.Sprintf("%s.%s", table, foreignName), "]", "didx:", dIdx)
-				dropSQLs := d.GenDropForeignKeyMulti(table, dIdx)
+				dropSQLs := d.GenDropForeignKey(table, dIdx)
 				if len(dropSQLs) > 0 {
 					classifySQL(dropSQLs, &alterClauses, &standaloneSQL)
 					log.Println("[Debug] check foreignKey.drop ", fmt.Sprintf("%s.%s", table, foreignName), "sql=", dropSQLs)

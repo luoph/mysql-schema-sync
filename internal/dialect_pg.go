@@ -1159,10 +1159,6 @@ func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) []string 
 	return nil
 }
 
-func (p *PostgresDialect) GenDropIndexMulti(tableName string, idx *DbIndex) []string {
-	return p.GenDropIndex(tableName, idx)
-}
-
 func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
 	// FK 同约束：总是前置 DROP CONSTRAINT IF EXISTS 兜底幂等（needDrop 参数不再影响是否 drop）。
@@ -1174,10 +1170,6 @@ func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needD
 
 func (p *PostgresDialect) GenDropForeignKey(tableName string, idx *DbIndex) []string {
 	return []string{fmt.Sprintf(`DROP CONSTRAINT IF EXISTS "%s"`, idx.Name)}
-}
-
-func (p *PostgresDialect) GenDropForeignKeyMulti(tableName string, idx *DbIndex) []string {
-	return p.GenDropForeignKey(tableName, idx)
 }
 
 func (p *PostgresDialect) GenCreateTable(schema string) string {
