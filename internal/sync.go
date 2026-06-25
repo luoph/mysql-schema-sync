@@ -150,6 +150,7 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 		}
 		if te, ok := d.(TriggerEnumerator); ok {
 			for _, trg := range alter.SchemaDiff.Source.Triggers {
+				alter.SQL = append(alter.SQL, te.GenDropTrigger(trg))
 				alter.SQL = append(alter.SQL, te.GenAddTrigger(trg))
 			}
 		}
@@ -551,8 +552,12 @@ func (sc *SchemaSync) diffTriggers(alter *TableAlterData) []string {
 		if has && sc.definitionsEqual(src.Definition, dst.Definition) {
 			continue
 		}
+		// 幂等：无论目标是否已有同名触发器，CREATE 前一律 DROP IF EXISTS，
+		// 让脚本可重跑（PG 无 CREATE TRIGGER IF NOT EXISTS）。
 		if has {
 			sqls = append(sqls, te.GenDropTrigger(dst))
+		} else {
+			sqls = append(sqls, te.GenDropTrigger(src))
 		}
 		sqls = append(sqls, te.GenAddTrigger(src))
 	}

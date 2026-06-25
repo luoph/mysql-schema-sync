@@ -405,8 +405,9 @@ func TestSchemaSync_diffTriggers(t *testing.T) {
 			},
 		}
 		sqls := mkSC(cfgNoDrop).diffTriggers(alter)
-		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, "CREATE TRIGGER a ...;", sqls[0])
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP TRIGGER IF EXISTS "a" ON "t";`, sqls[0])
+		xt.Equal(t, "CREATE TRIGGER a ...;", sqls[1])
 	})
 
 	t.Run("definition changed: drop then create", func(t *testing.T) {
