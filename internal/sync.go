@@ -327,7 +327,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 
 			if len(newClauses) != 0 {
 				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "alterSQL=", newClauses)
-				alterClauses = append(alterClauses, newClauses...)
+				classifySQL(newClauses, &alterClauses, &standaloneSQL)
 			} else {
 				log.Println("[Debug] check column.alter ", fmt.Sprintf("%s.%s", table, fieldName), "not change")
 			}
@@ -344,7 +344,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) (alterClauses []strin
 			}
 			if _, has := sourceMyS.Fields.Get(name); !has {
 				dropClauses := d.GenDropColumn(table, name)
-				alterClauses = append(alterClauses, dropClauses...)
+				classifySQL(dropClauses, &alterClauses, &standaloneSQL)
 				log.Println("[Debug] check column.drop ", fmt.Sprintf("%s.%s", table, name), "alterSQL=", dropClauses)
 			}
 		}

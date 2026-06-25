@@ -235,14 +235,57 @@ func (m *MySQLDialect) FieldDef(field *FieldInfo) string {
 
 func (m *MySQLDialect) SupportsColumnOrder() bool { return true }
 
-func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {
-	if afterCol == "" {
-		if isFirst {
-			return []string{"ADD " + colDef + " FIRST"}
-		}
-		return []string{"ADD " + colDef}
+// mysqlEscapeSQLLiteral 转义将被内嵌进单引号字符串字面量的 DDL：先转义反斜杠，
+// 再转义单引号（顺序不可换，避免二次转义）。
+func mysqlEscapeSQLLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
+}
+
+// mysqlGuard 生成运行时存在性守卫块：仅当 information_schema 探测计数满足条件时执行
+// ddl，否则执行无害 'SELECT 1'。返回 4 条带分号的独立语句。
+// probeFrom 形如 "information_schema.COLUMNS"；probeWhere 为不含 WHERE 关键字、已含
+// TABLE_SCHEMA=DATABASE() 的条件。runWhenExists=false → COUNT(*)=0 才执行（ADD 语义），
+// true → COUNT(*)>0 才执行（DROP 语义）。
+func mysqlGuard(probeFrom, probeWhere, ddl string, runWhenExists bool) []string {
+	cmp := "=0"
+	if runWhenExists {
+		cmp = ">0"
 	}
-	return []string{fmt.Sprintf("ADD %s AFTER `%s`", colDef, afterCol)}
+	set := fmt.Sprintf("SET @__mss_sql = (SELECT IF(COUNT(*)%s, '%s', 'SELECT 1') FROM %s WHERE %s);",
+		cmp, mysqlEscapeSQLLiteral(ddl), probeFrom, probeWhere)
+	return []string{
+		set,
+		"PREPARE __mss_stmt FROM @__mss_sql;",
+		"EXECUTE __mss_stmt;",
+		"DEALLOCATE PREPARE __mss_stmt;",
+	}
+}
+
+// mysqlColumnName 从列定义（如 "`age` int NOT NULL"）取第一对反引号内的列名。
+func mysqlColumnName(colDef string) string {
+	s := strings.TrimSpace(colDef)
+	if len(s) > 0 && s[0] == '`' {
+		if i := strings.IndexByte(s[1:], '`'); i >= 0 {
+			return s[1 : i+1]
+		}
+	}
+	return s
+}
+
+func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool, fieldCount int) []string {
+	var ddl string
+	switch {
+	case afterCol == "" && isFirst:
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s FIRST", table, colDef)
+	case afterCol == "":
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s", table, colDef)
+	default:
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s AFTER `%s`", table, colDef, afterCol)
+	}
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", table, mysqlColumnName(colDef))
+	return mysqlGuard("information_schema.COLUMNS", where, ddl, false)
 }
 
 func (m *MySQLDialect) GenChangeColumn(fieldName string, src, dst *FieldInfo) []string {
@@ -254,7 +297,9 @@ func (m *MySQLDialect) GenChangeColumnText(fieldName, colDef string) string {
 }
 
 func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
-	return []string{fmt.Sprintf("drop `%s`", colName)}
+	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `%s`", table, colName)
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", table, colName)
+	return mysqlGuard("information_schema.COLUMNS", where, ddl, true)
 }
 
 func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {

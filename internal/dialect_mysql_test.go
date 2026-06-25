@@ -95,6 +95,60 @@ func TestMySQLDialect_GenCommentTableSQL(t *testing.T) {
 	})
 }
 
+func TestMySQLEscapeSQLLiteral(t *testing.T) {
+	xt.Equal(t, "a''b", mysqlEscapeSQLLiteral("a'b"))
+	xt.Equal(t, `a\\b`, mysqlEscapeSQLLiteral(`a\b`))
+	xt.Equal(t, `\\''`, mysqlEscapeSQLLiteral(`\'`))
+}
+
+func TestMySQLGuard(t *testing.T) {
+	t.Run("add semantics uses COUNT=0", func(t *testing.T) {
+		got := mysqlGuard("information_schema.COLUMNS",
+			"TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND COLUMN_NAME='c'",
+			"ALTER TABLE `t` ADD `c` int", false)
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `t` ADD `c` int', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND COLUMN_NAME='c');",
+			got[0])
+		xt.Equal(t, "PREPARE __mss_stmt FROM @__mss_sql;", got[1])
+		xt.Equal(t, "EXECUTE __mss_stmt;", got[2])
+		xt.Equal(t, "DEALLOCATE PREPARE __mss_stmt;", got[3])
+	})
+	t.Run("drop semantics uses COUNT>0 and escapes ddl", func(t *testing.T) {
+		got := mysqlGuard("information_schema.STATISTICS",
+			"TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND INDEX_NAME='idx'",
+			"ALTER TABLE `t` DROP INDEX `idx`", true)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `t` DROP INDEX `idx`', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='t' AND INDEX_NAME='idx');",
+			got[0])
+	})
+}
+
+func TestMySQLDialect_GuardColumns(t *testing.T) {
+	d := &MySQLDialect{}
+
+	t.Run("add column guarded", func(t *testing.T) {
+		got := d.GenAddColumn("user", "`age` int NOT NULL", "email", false, 1)
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `user` ADD `age` int NOT NULL AFTER `email`', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND COLUMN_NAME='age');",
+			got[0])
+	})
+	t.Run("add first column guarded", func(t *testing.T) {
+		got := d.GenAddColumn("user", "`age` int NOT NULL", "", true, 0)
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `user` ADD `age` int NOT NULL FIRST', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND COLUMN_NAME='age');",
+			got[0])
+	})
+	t.Run("drop column guarded", func(t *testing.T) {
+		got := d.GenDropColumn("user", "age")
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `user` DROP COLUMN `age`', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND COLUMN_NAME='age');",
+			got[0])
+	})
+}
+
 func TestMySQLDialect_Idempotent_Table(t *testing.T) {
 	d := &MySQLDialect{}
 
