@@ -633,28 +633,27 @@ func (p *PostgresDialect) GenDropColumn(table, colName string) []string {
 func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
 
-	if needDrop {
-		dropSQL := p.GenDropIndex(tableName, idx)
-		if dropSQL != "" {
-			sqls = append(sqls, dropSQL)
-		}
-	}
-
-	// Defensive: strip any residual CONSTRAINT "name" prefix from idx.SQL
-	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
-
+	// 约束类（PK/UNIQUE/CHECK）：PG 无 ADD CONSTRAINT IF NOT EXISTS，总是前置
+	// DROP CONSTRAINT IF EXISTS 兜底幂等；普通索引用 CREATE INDEX IF NOT EXISTS。
 	switch idx.IndexType {
 	case indexTypePrimary, indexTypeUnique, checkConstraint:
+		if dropSQL := p.GenDropIndex(tableName, idx); dropSQL != "" {
+			sqls = append(sqls, dropSQL)
+		}
+		defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	case indexTypeIndex:
-		// 对于 IndexEnumerator 返回的普通索引，idx.SQL 已是完整 CREATE INDEX ... 语句
-		// （支持 USING btree/gin/hnsw/…，以及 WHERE 条件和表达式索引），原样使用即可；
-		// 旧路径下 defSQL 只是列表达式，则按 btree 拼接兼容。
+		if needDrop {
+			if dropSQL := p.GenDropIndex(tableName, idx); dropSQL != "" {
+				sqls = append(sqls, dropSQL)
+			}
+		}
+		defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 		upperDef := strings.ToUpper(strings.TrimSpace(defSQL))
 		if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
-			sqls = append(sqls, ensureSemicolon(pgRewriteIndexTable(defSQL, tableName)))
+			sqls = append(sqls, ensureSemicolon(pgIndexIfNotExists(pgRewriteIndexTable(defSQL, tableName))))
 		} else {
-			sqls = append(sqls, fmt.Sprintf(`CREATE INDEX %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
+			sqls = append(sqls, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %q ON "%s" USING btree (%s);`, idx.Name, tableName, defSQL))
 		}
 	}
 
@@ -858,6 +857,18 @@ var pgIndexHeadReg = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+\S+\
 // （可能是 schema-qualified，比如 "public.user_chat"，也可能是裸名）。
 // 仅匹配第一处，仅作用于开头，不会误伤索引表达式内的子串。
 var pgIndexOnTableReg = regexp.MustCompile(`(?is)^(CREATE\s+(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+)\S+`)
+
+// pgIndexIfNotExists 在 "CREATE INDEX" / "CREATE UNIQUE INDEX" 之后插入 "IF NOT EXISTS"，
+// 已含则原样返回。仅作用于语句开头，不影响 USING method / 列表达式 / WHERE。
+var pgCreateIndexHeadReg = regexp.MustCompile(`(?i)^(CREATE\s+(?:UNIQUE\s+)?INDEX)\s+`)
+
+func pgIndexIfNotExists(def string) string {
+	s := strings.TrimSpace(def)
+	if regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS`).MatchString(s) {
+		return s
+	}
+	return pgCreateIndexHeadReg.ReplaceAllString(s, "$1 IF NOT EXISTS ")
+}
 
 // pgRewriteIndexTable 将 pg_get_indexdef 返回的 head 中带 schema 限定的表名
 // 改写为不带 schema 的双引号包裹形式（"<tableName>"），使 CREATE INDEX 输出
@@ -1148,10 +1159,8 @@ func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) string {
 
 func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
-	if needDrop {
-		sqls = append(sqls, p.GenDropForeignKey(tableName, idx))
-	}
-	// Defensive: strip any residual CONSTRAINT "name" prefix from idx.SQL
+	// FK 同约束：总是前置 DROP CONSTRAINT IF EXISTS 兜底幂等（needDrop 参数不再影响是否 drop）。
+	sqls = append(sqls, p.GenDropForeignKey(tableName, idx))
 	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
 	sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
 	return sqls

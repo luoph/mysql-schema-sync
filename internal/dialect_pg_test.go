@@ -279,8 +279,9 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	t.Run("add primary key", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
 		sqls := d.GenAddIndex("test", idx, false)
-		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[0])
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
 	})
 
 	t.Run("drop primary key", func(t *testing.T) {
@@ -292,13 +293,15 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	t.Run("add unique constraint", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeUnique, Name: "uq_email", SQL: `UNIQUE ("email")`}
 		sqls := d.GenAddIndex("test", idx, false)
-		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `ADD CONSTRAINT "uq_email" UNIQUE ("email")`, sqls[0])
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "uq_email"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "uq_email" UNIQUE ("email")`, sqls[1])
 	})
 
 	t.Run("add with drop", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
 		sqls := d.GenAddIndex("test", idx, true)
+		// Constraint type: always drops first regardless of needDrop
 		xt.Equal(t, 2, len(sqls))
 		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
 		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
@@ -312,7 +315,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("user_agent_file", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_user_id ON "user_agent_file" USING btree (user_id);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_user_id ON "user_agent_file" USING btree (user_id);`, sqls[0])
 	})
 
 	t.Run("add hnsw index with full def", func(t *testing.T) {
@@ -323,7 +326,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("note_embedding", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_hnsw ON "note_embedding" USING hnsw (embedding vector_cosine_ops);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_hnsw ON "note_embedding" USING hnsw (embedding vector_cosine_ops);`, sqls[0])
 	})
 
 	t.Run("add partial index with WHERE clause", func(t *testing.T) {
@@ -334,7 +337,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		}
 		sqls := d.GenAddIndex("t", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX idx_active ON "t" USING btree (user_id) WHERE (is_deleted = false);`, sqls[0])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_active ON "t" USING btree (user_id) WHERE (is_deleted = false);`, sqls[0])
 	})
 
 	t.Run("full def index with drop first", func(t *testing.T) {
@@ -346,7 +349,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		sqls := d.GenAddIndex("t", idx, true)
 		xt.Equal(t, 2, len(sqls))
 		xt.Equal(t, `DROP INDEX IF EXISTS "idx_user_id";`, sqls[0])
-		xt.Equal(t, `CREATE INDEX idx_user_id ON "t" USING btree (user_id);`, sqls[1])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_user_id ON "t" USING btree (user_id);`, sqls[1])
 	})
 
 	t.Run("legacy expression-only index def falls back to btree wrap", func(t *testing.T) {
@@ -354,7 +357,7 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_a", SQL: `"a", "b"`}
 		sqls := d.GenAddIndex("t", idx, false)
 		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `CREATE INDEX "idx_a" ON "t" USING btree ("a", "b");`, sqls[0])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS "idx_a" ON "t" USING btree ("a", "b");`, sqls[0])
 	})
 }
 
@@ -485,8 +488,9 @@ func TestPostgresDialect_GenForeignKey(t *testing.T) {
 	t.Run("add foreign key", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user", SQL: `FOREIGN KEY ("user_id") REFERENCES "user" ("id")`}
 		sqls := d.GenAddForeignKey("orders", idx, false)
-		xt.Equal(t, 1, len(sqls))
-		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[0])
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[1])
 	})
 
 	t.Run("drop foreign key", func(t *testing.T) {
@@ -524,6 +528,60 @@ func TestPostgresDialect_WrapAlterSQL(t *testing.T) {
 	t.Run("empty clauses", func(t *testing.T) {
 		result := d.WrapAlterSQL("test", nil, false)
 		xt.Equal(t, 0, len(result))
+	})
+}
+
+func TestPgIndexIfNotExists(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"CREATE INDEX idx ON t USING btree (a)", "CREATE INDEX IF NOT EXISTS idx ON t USING btree (a)"},
+		{"CREATE UNIQUE INDEX idx ON t USING btree (a)", "CREATE UNIQUE INDEX IF NOT EXISTS idx ON t USING btree (a)"},
+		{"CREATE INDEX IF NOT EXISTS idx ON t USING btree (a)", "CREATE INDEX IF NOT EXISTS idx ON t USING btree (a)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			xt.Equal(t, tt.want, pgIndexIfNotExists(tt.in))
+		})
+	}
+}
+
+func TestPostgresDialect_Idempotent_AddSide(t *testing.T) {
+	d := &PostgresDialect{}
+
+	t.Run("add primary key always drops first", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
+		sqls := d.GenAddIndex("test", idx, false)
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
+	})
+	t.Run("add btree index if not exists", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_user_id",
+			SQL: `CREATE INDEX idx_user_id ON public.t USING btree (user_id)`}
+		sqls := d.GenAddIndex("t", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_user_id ON "t" USING btree (user_id);`, sqls[0])
+	})
+	t.Run("legacy expression index if not exists", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_a", SQL: `"a", "b"`}
+		sqls := d.GenAddIndex("t", idx, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS "idx_a" ON "t" USING btree ("a", "b");`, sqls[0])
+	})
+	t.Run("add index with drop", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_user_id",
+			SQL: `CREATE INDEX idx_user_id ON public.t USING btree (user_id)`}
+		sqls := d.GenAddIndex("t", idx, true)
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP INDEX IF EXISTS "idx_user_id";`, sqls[0])
+		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_user_id ON "t" USING btree (user_id);`, sqls[1])
+	})
+	t.Run("add foreign key always drops first", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user",
+			SQL: `FOREIGN KEY ("user_id") REFERENCES "user" ("id")`}
+		sqls := d.GenAddForeignKey("orders", idx, false)
+		xt.Equal(t, 2, len(sqls))
+		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[1])
 	})
 }
 

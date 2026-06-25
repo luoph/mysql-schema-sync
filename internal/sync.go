@@ -142,7 +142,7 @@ func (sc *SchemaSync) getAlterDataBySchema(table string, sSchema string, dSchema
 			}
 			upperDef := strings.ToUpper(strings.TrimSpace(idx.SQL))
 			if strings.HasPrefix(upperDef, "CREATE INDEX") || strings.HasPrefix(upperDef, "CREATE UNIQUE INDEX") {
-				alter.SQL = append(alter.SQL, strings.TrimRight(idx.SQL, ";")+";")
+				alter.SQL = append(alter.SQL, ensureSemicolon(pgIndexIfNotExists(strings.TrimRight(idx.SQL, ";"))))
 				if idxCommenter != nil && idx.Comment != "" {
 					alter.SQL = append(alter.SQL, idxCommenter.GenCommentIndexSQL(idx.Name, idx.Comment))
 				}
