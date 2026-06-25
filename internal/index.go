@@ -67,6 +67,23 @@ func (idx *DbIndex) mysqlIndexProbeName() string {
 	return idx.Name
 }
 
+// mysqlProbe 返回该索引类型对应的 information_schema 探测来源表（from）与名称条件
+// 片段（nameCondition，不含 AND 前缀，已含名称列与 CONSTRAINT_TYPE 等限定）。
+// 调用方负责将 TABLE_SCHEMA=DATABASE() AND TABLE_NAME='...' 与 nameCondition 拼接。
+//
+//   - checkConstraint → information_schema.TABLE_CONSTRAINTS，条件为
+//     CONSTRAINT_NAME='<Name>' AND CONSTRAINT_TYPE='CHECK'
+//   - 其他 → information_schema.STATISTICS，条件为
+//     INDEX_NAME='<mysqlIndexProbeName()>'
+func (idx *DbIndex) mysqlProbe(escapeFn func(string) string) (from, nameCondition string) {
+	if idx.IndexType == checkConstraint {
+		return "information_schema.TABLE_CONSTRAINTS",
+			fmt.Sprintf("CONSTRAINT_NAME='%s' AND CONSTRAINT_TYPE='CHECK'", escapeFn(idx.Name))
+	}
+	return "information_schema.STATISTICS",
+		fmt.Sprintf("INDEX_NAME='%s'", escapeFn(idx.mysqlIndexProbeName()))
+}
+
 func (idx *DbIndex) addRelationTable(table string) {
 	table = strings.TrimSpace(table)
 	if len(table) != 0 {

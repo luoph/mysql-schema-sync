@@ -313,15 +313,17 @@ func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool
 		sqls = append(sqls, m.GenDropIndexGuard(tableName, idx)...)
 	}
 	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlAddBody())
-	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND INDEX_NAME='%s'", mysqlEscapeSQLLiteral(tableName), mysqlEscapeSQLLiteral(idx.mysqlIndexProbeName()))
-	return append(sqls, mysqlGuard("information_schema.STATISTICS", where, ddl, false)...)
+	from, nameCond := idx.mysqlProbe(mysqlEscapeSQLLiteral)
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND %s", mysqlEscapeSQLLiteral(tableName), nameCond)
+	return append(sqls, mysqlGuard(from, where, ddl, false)...)
 }
 
 // GenDropIndexGuard 返回带存在性守卫的 DROP INDEX/PRIMARY KEY 语句组（4条）。
 func (m *MySQLDialect) GenDropIndexGuard(tableName string, idx *DbIndex) []string {
 	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlDropBody())
-	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND INDEX_NAME='%s'", mysqlEscapeSQLLiteral(tableName), mysqlEscapeSQLLiteral(idx.mysqlIndexProbeName()))
-	return mysqlGuard("information_schema.STATISTICS", where, ddl, true)
+	from, nameCond := idx.mysqlProbe(mysqlEscapeSQLLiteral)
+	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND %s", mysqlEscapeSQLLiteral(tableName), nameCond)
+	return mysqlGuard(from, where, ddl, true)
 }
 
 func (m *MySQLDialect) GenDropIndex(tableName string, idx *DbIndex) []string {

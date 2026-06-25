@@ -244,6 +244,38 @@ func TestMySQLDialect_GuardIndexes(t *testing.T) {
 	})
 }
 
+func TestMySQLDialect_GuardCheckConstraint(t *testing.T) {
+	d := &MySQLDialect{}
+	idx := &DbIndex{
+		IndexType: checkConstraint,
+		Name:      "chk_price",
+		SQL:       "CONSTRAINT `chk_price` CHECK ((`price` > 0))",
+	}
+
+	t.Run("add check constraint probes TABLE_CONSTRAINTS", func(t *testing.T) {
+		got := d.GenAddIndex("product", idx, false)
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t,
+			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `product` ADD CONSTRAINT `chk_price` CHECK ((`price` > 0))', 'SELECT 1') FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product' AND CONSTRAINT_NAME='chk_price' AND CONSTRAINT_TYPE='CHECK');",
+			got[0])
+	})
+
+	t.Run("drop check constraint probes TABLE_CONSTRAINTS", func(t *testing.T) {
+		got := d.GenDropIndex("product", idx)
+		xt.Equal(t, 4, len(got))
+		xt.Equal(t, true, strings.Contains(got[0], "IF(COUNT(*)>0"))
+		xt.Equal(t, true, strings.Contains(got[0], "ALTER TABLE `product` DROP CHECK `chk_price`"))
+		xt.Equal(t, true, strings.Contains(got[0], "FROM information_schema.TABLE_CONSTRAINTS"))
+		xt.Equal(t, true, strings.Contains(got[0], "CONSTRAINT_TYPE='CHECK'"))
+	})
+
+	t.Run("normal index still uses STATISTICS", func(t *testing.T) {
+		idxNormal := &DbIndex{IndexType: indexTypeUnique, Name: "uk", SQL: "UNIQUE KEY `uk` (`a`)"}
+		got := d.GenAddIndex("user", idxNormal, false)
+		xt.Equal(t, true, strings.Contains(got[0], "FROM information_schema.STATISTICS"))
+	})
+}
+
 func TestMySQLDialect_GuardForeignKeys(t *testing.T) {
 	d := &MySQLDialect{}
 
