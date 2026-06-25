@@ -108,9 +108,8 @@ runSync:
 
 			var ret error
 			if sc.Config.Sync {
-				// 单表事务：本表相关的 ALTER/CREATE INDEX/CREATE TRIGGER 等语句作为
-				// 一个原子单元执行，任意一条失败则整表回滚，避免部分应用导致的
-				// 状态分裂。
+				// 单表事务：PG 下本表相关语句作为原子单元执行，任意一条失败则整表回滚；
+				// MySQL 的每条 DDL 隐式提交，失败时已提交语句无法撤销，恢复依赖幂等守卫的可重跑性。
 				ret = sc.SyncSQL4DestInTx(tableSqls)
 				if ret == nil {
 					countSuccess++

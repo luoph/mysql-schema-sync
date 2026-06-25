@@ -95,6 +95,21 @@ func TestMySQLDialect_GenCommentTableSQL(t *testing.T) {
 	})
 }
 
+func TestMySQLQuoteIdent(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"user", "user"},
+		{"we`ird", "we``ird"},
+		{"a`b`c", "a``b``c"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		xt.Equal(t, tt.want, mysqlQuoteIdent(tt.input))
+	}
+}
+
 func TestMySQLEscapeSQLLiteral(t *testing.T) {
 	xt.Equal(t, "a''b", mysqlEscapeSQLLiteral("a'b"))
 	xt.Equal(t, `a\\b`, mysqlEscapeSQLLiteral(`a\b`))

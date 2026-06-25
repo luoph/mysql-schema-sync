@@ -741,9 +741,9 @@ func classifySQL(sqls []string, alterClauses, standaloneSQL *[]string) {
 }
 
 // SyncSQL4DestInTx 在单个事务中顺序执行一批 DDL 语句。
-// 任意一条失败则整批回滚，避免部分成功造成的状态分裂。
-// PostgreSQL 原生支持事务性 DDL；MySQL 的 DDL 会隐式提交，BEGIN/COMMIT
-// 仅作为语义包装但不影响正确性。
+// PostgreSQL 原生支持事务性 DDL：任意一条失败则整批回滚，避免部分成功造成的状态分裂。
+// MySQL 的每条 DDL 隐式提交，BEGIN/COMMIT 在 MySQL 下仅为语义包装，无法回滚已提交的 DDL；
+// 中途失败时已执行的语句无法撤销，恢复依赖于守卫式（幂等）DDL 的可重跑性。
 func (sc *SchemaSync) SyncSQL4DestInTx(sqls []string) error {
 	if len(sqls) == 0 {
 		return nil

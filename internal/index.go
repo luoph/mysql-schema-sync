@@ -49,11 +49,11 @@ func (idx *DbIndex) mysqlDropBody() string {
 	case indexTypePrimary:
 		return "DROP PRIMARY KEY"
 	case indexTypeIndex, indexTypeUnique:
-		return fmt.Sprintf("DROP INDEX `%s`", idx.Name)
+		return fmt.Sprintf("DROP INDEX `%s`", mysqlQuoteIdent(idx.Name))
 	case indexTypeForeignKey:
-		return fmt.Sprintf("DROP FOREIGN KEY `%s`", idx.Name)
+		return fmt.Sprintf("DROP FOREIGN KEY `%s`", mysqlQuoteIdent(idx.Name))
 	case checkConstraint:
-		return fmt.Sprintf("DROP CHECK `%s`", idx.Name)
+		return fmt.Sprintf("DROP CHECK `%s`", mysqlQuoteIdent(idx.Name))
 	}
 	return ""
 }
@@ -70,6 +70,9 @@ func (idx *DbIndex) mysqlIndexProbeName() string {
 // mysqlProbe 返回该索引类型对应的 information_schema 探测来源表（from）与名称条件
 // 片段（nameCondition，不含 AND 前缀，已含名称列与 CONSTRAINT_TYPE 等限定）。
 // 调用方负责将 TABLE_SCHEMA=DATABASE() AND TABLE_NAME='...' 与 nameCondition 拼接。
+//
+// 注意：不得以 indexTypeForeignKey 调用本函数；外键由 GenAddForeignKey /
+// GenDropForeignKeyGuard 独立探测 information_schema.TABLE_CONSTRAINTS。
 //
 //   - checkConstraint → information_schema.TABLE_CONSTRAINTS，条件为
 //     CONSTRAINT_NAME='<Name>' AND CONSTRAINT_TYPE='CHECK'

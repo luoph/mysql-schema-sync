@@ -235,6 +235,12 @@ func (m *MySQLDialect) FieldDef(field *FieldInfo) string {
 
 func (m *MySQLDialect) SupportsColumnOrder() bool { return true }
 
+// mysqlQuoteIdent 转义反引号包裹的标识符：把名字内部的反引号双写。
+// 用于所有由本工具拼接进 `...` 的标识符（表名、列名、索引名、外键名）。
+func mysqlQuoteIdent(name string) string {
+	return strings.ReplaceAll(name, "`", "``")
+}
+
 // mysqlEscapeSQLLiteral 转义将被内嵌进单引号字符串字面量的 DDL：先转义反斜杠，
 // 再转义单引号（顺序不可换，避免二次转义）。
 func mysqlEscapeSQLLiteral(s string) string {
@@ -283,11 +289,11 @@ func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool
 	var ddl string
 	switch {
 	case afterCol == "" && isFirst:
-		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s FIRST", table, colDef)
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s FIRST", mysqlQuoteIdent(table), colDef)
 	case afterCol == "":
-		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s", table, colDef)
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s", mysqlQuoteIdent(table), colDef)
 	default:
-		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s AFTER `%s`", table, colDef, afterCol)
+		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s AFTER `%s`", mysqlQuoteIdent(table), colDef, mysqlQuoteIdent(afterCol))
 	}
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", mysqlEscapeSQLLiteral(table), mysqlEscapeSQLLiteral(mysqlColumnName(colDef)))
 	return mysqlGuard("information_schema.COLUMNS", where, ddl, false)
@@ -302,7 +308,7 @@ func (m *MySQLDialect) GenChangeColumnText(fieldName, colDef string) string {
 }
 
 func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
-	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `%s`", table, colName)
+	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `%s`", mysqlQuoteIdent(table), mysqlQuoteIdent(colName))
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", mysqlEscapeSQLLiteral(table), mysqlEscapeSQLLiteral(colName))
 	return mysqlGuard("information_schema.COLUMNS", where, ddl, true)
 }
@@ -312,7 +318,7 @@ func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool
 	if needDrop {
 		sqls = append(sqls, m.GenDropIndexGuard(tableName, idx)...)
 	}
-	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlAddBody())
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", mysqlQuoteIdent(tableName), idx.mysqlAddBody())
 	from, nameCond := idx.mysqlProbe(mysqlEscapeSQLLiteral)
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND %s", mysqlEscapeSQLLiteral(tableName), nameCond)
 	return append(sqls, mysqlGuard(from, where, ddl, false)...)
@@ -320,7 +326,7 @@ func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool
 
 // GenDropIndexGuard 返回带存在性守卫的 DROP INDEX/PRIMARY KEY 语句组（4条）。
 func (m *MySQLDialect) GenDropIndexGuard(tableName string, idx *DbIndex) []string {
-	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlDropBody())
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", mysqlQuoteIdent(tableName), idx.mysqlDropBody())
 	from, nameCond := idx.mysqlProbe(mysqlEscapeSQLLiteral)
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND %s", mysqlEscapeSQLLiteral(tableName), nameCond)
 	return mysqlGuard(from, where, ddl, true)
@@ -335,14 +341,14 @@ func (m *MySQLDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop
 	if needDrop {
 		sqls = append(sqls, m.GenDropForeignKeyGuard(tableName, idx)...)
 	}
-	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", tableName, idx.mysqlAddBody())
+	ddl := fmt.Sprintf("ALTER TABLE `%s` %s", mysqlQuoteIdent(tableName), idx.mysqlAddBody())
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND CONSTRAINT_NAME='%s' AND CONSTRAINT_TYPE='FOREIGN KEY'", mysqlEscapeSQLLiteral(tableName), mysqlEscapeSQLLiteral(idx.Name))
 	return append(sqls, mysqlGuard("information_schema.TABLE_CONSTRAINTS", where, ddl, false)...)
 }
 
 // GenDropForeignKeyGuard 返回带存在性守卫的 DROP FOREIGN KEY 语句组（4条）。
 func (m *MySQLDialect) GenDropForeignKeyGuard(tableName string, idx *DbIndex) []string {
-	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", tableName, idx.Name)
+	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP FOREIGN KEY `%s`", mysqlQuoteIdent(tableName), mysqlQuoteIdent(idx.Name))
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND CONSTRAINT_NAME='%s' AND CONSTRAINT_TYPE='FOREIGN KEY'", mysqlEscapeSQLLiteral(tableName), mysqlEscapeSQLLiteral(idx.Name))
 	return mysqlGuard("information_schema.TABLE_CONSTRAINTS", where, ddl, true)
 }
@@ -363,7 +369,7 @@ func (m *MySQLDialect) GenCreateTable(schema string) string {
 }
 
 func (m *MySQLDialect) GenDropTable(tableName string) string {
-	return fmt.Sprintf("DROP TABLE IF EXISTS `%s`;", tableName)
+	return fmt.Sprintf("DROP TABLE IF EXISTS `%s`;", mysqlQuoteIdent(tableName))
 }
 
 func (m *MySQLDialect) GenCommentColumnSQL(tableName, colName, comment string) string {
