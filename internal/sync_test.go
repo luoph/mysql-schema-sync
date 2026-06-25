@@ -136,4 +136,13 @@ func TestClassifySQL(t *testing.T) {
 		xt.Equal(t, 0, len(alterClauses))
 		xt.Equal(t, 2, len(standalone))
 	})
+
+	t.Run("DO block goes standalone", func(t *testing.T) {
+		var alterClauses, standalone []string
+		doBlock := `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON c.conrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid WHERE n.nspname = 'public' AND t.relname = 'test' AND c.conname = 'pk_test') THEN ALTER TABLE "test" ADD CONSTRAINT "pk_test" PRIMARY KEY ("id"); END IF; END $$;`
+		classifySQL([]string{doBlock}, &alterClauses, &standalone)
+		xt.Equal(t, 0, len(alterClauses))
+		xt.Equal(t, 1, len(standalone))
+		xt.Equal(t, doBlock, standalone[0])
+	})
 }

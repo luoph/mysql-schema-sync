@@ -277,11 +277,15 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	d := &PostgresDialect{}
 
 	t.Run("add primary key", func(t *testing.T) {
+		// needDrop=false (NEW): should emit a DO $$ IF NOT EXISTS ... $$ block, no DROP
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
 		sqls := d.GenAddIndex("test", idx, false)
-		xt.Equal(t, 2, len(sqls))
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
-		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, true, strings.HasPrefix(sqls[0], "DO $$"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "IF NOT EXISTS"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "t.relname = 'test'"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "c.conname = 'pk_test'"))
+		xt.Equal(t, true, strings.Contains(sqls[0], `ALTER TABLE "test" ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`))
 	})
 
 	t.Run("drop primary key", func(t *testing.T) {
@@ -291,17 +295,19 @@ func TestPostgresDialect_GenIndex(t *testing.T) {
 	})
 
 	t.Run("add unique constraint", func(t *testing.T) {
+		// needDrop=false (NEW): should emit a DO $$ IF NOT EXISTS ... $$ block, no DROP
 		idx := &DbIndex{IndexType: indexTypeUnique, Name: "uq_email", SQL: `UNIQUE ("email")`}
 		sqls := d.GenAddIndex("test", idx, false)
-		xt.Equal(t, 2, len(sqls))
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "uq_email"`, sqls[0])
-		xt.Equal(t, `ADD CONSTRAINT "uq_email" UNIQUE ("email")`, sqls[1])
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, true, strings.HasPrefix(sqls[0], "DO $$"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "IF NOT EXISTS"))
+		xt.Equal(t, true, strings.Contains(sqls[0], `ALTER TABLE "test" ADD CONSTRAINT "uq_email" UNIQUE ("email")`))
 	})
 
 	t.Run("add with drop", func(t *testing.T) {
+		// needDrop=true (CHANGED): keep drop-then-add pattern
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
 		sqls := d.GenAddIndex("test", idx, true)
-		// Constraint type: always drops first regardless of needDrop
 		xt.Equal(t, 2, len(sqls))
 		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
 		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
@@ -487,11 +493,15 @@ func TestPostgresDialect_GenForeignKey(t *testing.T) {
 	d := &PostgresDialect{}
 
 	t.Run("add foreign key", func(t *testing.T) {
+		// needDrop=false (NEW): should emit a DO $$ IF NOT EXISTS ... $$ block, no DROP
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user", SQL: `FOREIGN KEY ("user_id") REFERENCES "user" ("id")`}
 		sqls := d.GenAddForeignKey("orders", idx, false)
-		xt.Equal(t, 2, len(sqls))
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sqls[0])
-		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[1])
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, true, strings.HasPrefix(sqls[0], "DO $$"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "IF NOT EXISTS"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "t.relname = 'orders'"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "c.conname = 'fk_user'"))
+		xt.Equal(t, true, strings.Contains(sqls[0], `ALTER TABLE "orders" ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`))
 	})
 
 	t.Run("drop foreign key", func(t *testing.T) {
@@ -501,10 +511,12 @@ func TestPostgresDialect_GenForeignKey(t *testing.T) {
 	})
 
 	t.Run("add with drop", func(t *testing.T) {
+		// needDrop=true (CHANGED): keep drop-then-add pattern
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user", SQL: `FOREIGN KEY ("user_id") REFERENCES "user" ("id")`}
 		sqls := d.GenAddForeignKey("orders", idx, true)
 		xt.Equal(t, 2, len(sqls))
 		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sqls[0])
+		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[1])
 	})
 }
 
@@ -548,12 +560,14 @@ func TestPgIndexIfNotExists(t *testing.T) {
 func TestPostgresDialect_Idempotent_AddSide(t *testing.T) {
 	d := &PostgresDialect{}
 
-	t.Run("add primary key always drops first", func(t *testing.T) {
+	t.Run("add primary key new: DO block no drop", func(t *testing.T) {
+		// needDrop=false: new constraint → guarded DO block, no DROP
 		idx := &DbIndex{IndexType: indexTypePrimary, Name: "pk_test", SQL: `PRIMARY KEY ("id")`}
 		sqls := d.GenAddIndex("test", idx, false)
-		xt.Equal(t, 2, len(sqls))
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "pk_test"`, sqls[0])
-		xt.Equal(t, `ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`, sqls[1])
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, true, strings.HasPrefix(sqls[0], "DO $$"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "IF NOT EXISTS"))
+		xt.Equal(t, true, strings.Contains(sqls[0], `ALTER TABLE "test" ADD CONSTRAINT "pk_test" PRIMARY KEY ("id")`))
 	})
 	t.Run("add btree index if not exists", func(t *testing.T) {
 		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_user_id",
@@ -576,13 +590,15 @@ func TestPostgresDialect_Idempotent_AddSide(t *testing.T) {
 		xt.Equal(t, `DROP INDEX IF EXISTS "idx_user_id";`, sqls[0])
 		xt.Equal(t, `CREATE INDEX IF NOT EXISTS idx_user_id ON "t" USING btree (user_id);`, sqls[1])
 	})
-	t.Run("add foreign key always drops first", func(t *testing.T) {
+	t.Run("add foreign key new: DO block no drop", func(t *testing.T) {
+		// needDrop=false: new FK → guarded DO block, no DROP
 		idx := &DbIndex{IndexType: indexTypeForeignKey, Name: "fk_user",
 			SQL: `FOREIGN KEY ("user_id") REFERENCES "user" ("id")`}
 		sqls := d.GenAddForeignKey("orders", idx, false)
-		xt.Equal(t, 2, len(sqls))
-		xt.Equal(t, `DROP CONSTRAINT IF EXISTS "fk_user"`, sqls[0])
-		xt.Equal(t, `ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`, sqls[1])
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, true, strings.HasPrefix(sqls[0], "DO $$"))
+		xt.Equal(t, true, strings.Contains(sqls[0], "IF NOT EXISTS"))
+		xt.Equal(t, true, strings.Contains(sqls[0], `ALTER TABLE "orders" ADD CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "user" ("id")`))
 	})
 }
 

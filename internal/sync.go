@@ -731,7 +731,8 @@ func classifySQL(sqls []string, alterClauses, standaloneSQL *[]string) {
 			strings.HasPrefix(upper, "SET ") ||
 			strings.HasPrefix(upper, "PREPARE ") ||
 			strings.HasPrefix(upper, "EXECUTE ") ||
-			strings.HasPrefix(upper, "DEALLOCATE ") {
+			strings.HasPrefix(upper, "DEALLOCATE ") ||
+			strings.HasPrefix(upper, "DO ") {
 			*standaloneSQL = append(*standaloneSQL, s)
 		} else {
 			*alterClauses = append(*alterClauses, s)

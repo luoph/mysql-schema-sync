@@ -630,16 +630,34 @@ func (p *PostgresDialect) GenDropColumn(table, colName string) []string {
 	return []string{fmt.Sprintf(`DROP COLUMN IF EXISTS "%s"`, colName)}
 }
 
+// pgAddConstraintIfNotExists 生成一个仅在同名约束尚不存在时才 ADD CONSTRAINT 的幂等块。
+// 用于新增约束/外键：避免对被 FK 引用的 PK/UNIQUE 做 DROP（PG 不带 CASCADE 的 DROP 会因依赖失败），
+// 也避免重跑时无谓重建约束索引。def 为去掉 CONSTRAINT 前缀后的定义体（如 PRIMARY KEY (...) / UNIQUE (...) / FOREIGN KEY ... / CHECK (...)）。
+func pgAddConstraintIfNotExists(table, name, def string) string {
+	et := strings.ReplaceAll(table, "'", "''")
+	en := strings.ReplaceAll(name, "'", "''")
+	return fmt.Sprintf(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON c.conrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid WHERE n.nspname = 'public' AND t.relname = '%s' AND c.conname = '%s') THEN ALTER TABLE %q ADD CONSTRAINT %q %s; END IF; END $$;`, et, en, table, name, def)
+}
+
 func (p *PostgresDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
 
-	// 约束类（PK/UNIQUE/CHECK）：PG 无 ADD CONSTRAINT IF NOT EXISTS，总是前置
-	// DROP CONSTRAINT IF EXISTS 兜底幂等；普通索引用 CREATE INDEX IF NOT EXISTS。
+	// 约束类（PK/UNIQUE/CHECK）：PG 无 ADD CONSTRAINT IF NOT EXISTS。
+	// needDrop=false（新增）：用 DO $$ IF NOT EXISTS ... $$ 幂等块，不 DROP，
+	//   避免对被 FK 引用的 PK/UNIQUE 做无 CASCADE 的 DROP 失败，也避免重跑时无谓重建约束索引。
+	// needDrop=true（变更）：保留原有的 DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT 模式。
+	// 普通索引用 CREATE INDEX IF NOT EXISTS。
 	switch idx.IndexType {
 	case indexTypePrimary, indexTypeUnique, checkConstraint:
-		sqls = append(sqls, p.GenDropIndex(tableName, idx)...)
 		defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
-		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
+		if needDrop {
+			// 定义变更：必须替换同名约束
+			sqls = append(sqls, p.GenDropIndex(tableName, idx)...)
+			sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
+		} else {
+			// 新增：幂等添加且不 DROP（避免 FK 依赖失败与无谓重建）
+			sqls = append(sqls, pgAddConstraintIfNotExists(tableName, idx.Name, defSQL))
+		}
 	case indexTypeIndex:
 		if needDrop {
 			sqls = append(sqls, p.GenDropIndex(tableName, idx)...)
@@ -1161,10 +1179,15 @@ func (p *PostgresDialect) GenDropIndex(tableName string, idx *DbIndex) []string 
 
 func (p *PostgresDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
 	var sqls []string
-	// FK 同约束：总是前置 DROP CONSTRAINT IF EXISTS 兜底幂等（needDrop 参数不再影响是否 drop）。
-	sqls = append(sqls, p.GenDropForeignKey(tableName, idx)...)
 	defSQL := pgConstraintPrefixRe.ReplaceAllString(idx.SQL, "")
-	sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
+	if needDrop {
+		// 定义变更：必须替换同名外键
+		sqls = append(sqls, p.GenDropForeignKey(tableName, idx)...)
+		sqls = append(sqls, fmt.Sprintf("ADD CONSTRAINT %q %s", idx.Name, defSQL))
+	} else {
+		// 新增：幂等添加且不 DROP（避免 FK 依赖失败与无谓重建）
+		sqls = append(sqls, pgAddConstraintIfNotExists(tableName, idx.Name, defSQL))
+	}
 	return sqls
 }
 
