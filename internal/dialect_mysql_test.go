@@ -194,12 +194,15 @@ func TestMySQLDialect_GuardColumns(t *testing.T) {
 			"SET @__mss_sql = (SELECT IF(COUNT(*)=0, 'ALTER TABLE `user` ADD `age` int NOT NULL FIRST', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND COLUMN_NAME='age');",
 			got[0])
 	})
-	t.Run("drop column guarded", func(t *testing.T) {
+	t.Run("drop column bare clause", func(t *testing.T) {
+		// DROP COLUMN 不加 information_schema 守卫：返回裸子句，交由
+		// WrapAlterSQL 合并进单条 ALTER TABLE。
 		got := d.GenDropColumn("user", "age")
-		xt.Equal(t, 4, len(got))
-		xt.Equal(t,
-			"SET @__mss_sql = (SELECT IF(COUNT(*)>0, 'ALTER TABLE `user` DROP COLUMN `age`', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user' AND COLUMN_NAME='age');",
-			got[0])
+		xt.Equal(t, []string{"DROP COLUMN `age`"}, got)
+	})
+	t.Run("drop column escapes backtick in name", func(t *testing.T) {
+		got := d.GenDropColumn("user", "a`ge")
+		xt.Equal(t, []string{"DROP COLUMN `a``ge`"}, got)
 	})
 }
 

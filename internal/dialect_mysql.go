@@ -307,10 +307,13 @@ func (m *MySQLDialect) GenChangeColumnText(fieldName, colDef string) string {
 	return fmt.Sprintf("CHANGE `%s` %s", mysqlQuoteIdent(fieldName), colDef)
 }
 
+// GenDropColumn 生成裸 DROP COLUMN 子句（不带 information_schema 存在性守卫）。
+// 与 ADD/索引/外键 不同，DROP COLUMN 不追求可重跑幂等：diff 已确认该列在目标库
+// 存在才会走到这里，直接 DROP 即成功；且返回裸子句可由 WrapAlterSQL 把同表多个
+// DROP COLUMN 合并进单条 ALTER TABLE，避免守卫式 prepared statement 的冗长输出。
+// 代价：脚本重复执行时列已删会报错，此处不做防护。
 func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
-	ddl := fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `%s`", mysqlQuoteIdent(table), mysqlQuoteIdent(colName))
-	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", mysqlEscapeSQLLiteral(table), mysqlEscapeSQLLiteral(colName))
-	return mysqlGuard("information_schema.COLUMNS", where, ddl, true)
+	return []string{fmt.Sprintf("DROP COLUMN `%s`", mysqlQuoteIdent(colName))}
 }
 
 func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
