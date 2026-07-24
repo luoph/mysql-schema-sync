@@ -46,7 +46,7 @@ func TestDetectDialect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := DetectDialect(tt.dsn)
+			d := DetectDialect(tt.dsn, true)
 			xt.Equal(t, tt.want, d.DriverName())
 		})
 	}

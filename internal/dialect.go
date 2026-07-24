@@ -77,12 +77,13 @@ type Dialect interface {
 	WrapAlterSQL(tableName string, clauses []string, singleChange bool) []string
 }
 
-// DetectDialect returns the appropriate Dialect based on the DSN format
-func DetectDialect(dsn string) Dialect {
+// DetectDialect returns the appropriate Dialect based on the DSN format.
+// idempotent 控制 MySQL 是否生成 information_schema 守卫块（PG 始终用原生 IF [NOT] EXISTS，不受影响）。
+func DetectDialect(dsn string, idempotent bool) Dialect {
 	if strings.HasPrefix(dsn, "postgres://") ||
 		strings.HasPrefix(dsn, "postgresql://") ||
 		strings.Contains(dsn, "host=") {
 		return &PostgresDialect{}
 	}
-	return &MySQLDialect{}
+	return &MySQLDialect{PlainDDL: !idempotent}
 }

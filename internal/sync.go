@@ -20,8 +20,8 @@ type SchemaSync struct {
 func NewSchemaSync(config *Config) *SchemaSync {
 	s := new(SchemaSync)
 	s.Config = config
-	s.SourceDb = NewMyDb(config.SourceDSN, dbTypeSource)
-	s.DestDb = NewMyDb(config.DestDSN, dbTypeDest)
+	s.SourceDb = NewMyDb(config.SourceDSN, dbTypeSource, config.Idempotent)
+	s.DestDb = NewMyDb(config.DestDSN, dbTypeDest, config.Idempotent)
 	return s
 }
 

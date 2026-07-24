@@ -218,8 +218,8 @@ type MyDb struct {
 }
 
 // NewMyDb parse dsn and create database connection
-func NewMyDb(dsn string, dbType dbType) *MyDb {
-	dialect := DetectDialect(dsn)
+func NewMyDb(dsn string, dbType dbType, idempotent bool) *MyDb {
+	dialect := DetectDialect(dsn, idempotent)
 	db, err := sql.Open(dialect.DriverName(), dsn)
 	if err != nil {
 		panic(fmt.Sprintf("connected to db [%s] failed,err=%s", dsn, err))

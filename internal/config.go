@@ -43,6 +43,11 @@ type Config struct {
 
 	// SingleSchemaChange 生成sql ddl语言每条命令只会进行单个修改操作
 	SingleSchemaChange bool `json:"single_schema_change"`
+
+	// Idempotent 是否生成幂等可重跑 DDL（默认 true）。
+	// 为 false 时 MySQL 不再输出 information_schema 守卫块，改用合并裸 DDL，
+	// 输出更简洁但脚本不可重复执行（中途失败重跑会因对象已存在/不存在而报错）。
+	Idempotent bool `json:"idempotent"`
 }
 
 func (cfg *Config) String() string {

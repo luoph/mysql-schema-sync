@@ -353,3 +353,51 @@ func TestMySQLDialect_GuardForeignKeys(t *testing.T) {
 			got[0])
 	})
 }
+
+// TestMySQLDialect_PlainDDL 验证 PlainDDL=true 时各 Gen* 返回裸子句（无守卫块），
+// 且经 WrapAlterSQL 可合并成单条 ALTER TABLE。
+func TestMySQLDialect_PlainDDL(t *testing.T) {
+	d := &MySQLDialect{PlainDDL: true}
+
+	t.Run("AddColumn_bare_after", func(t *testing.T) {
+		got := d.GenAddColumn("app_product", "`scheme_version` int NOT NULL DEFAULT 1", "group_id", false, 1)
+		xt.Equal(t, 1, len(got))
+		xt.Equal(t, "ADD `scheme_version` int NOT NULL DEFAULT 1 AFTER `group_id`", got[0])
+		xt.Equal(t, false, strings.Contains(got[0], "__mss_sql"))
+	})
+
+	t.Run("AddColumn_first", func(t *testing.T) {
+		got := d.GenAddColumn("t", "`id` int", "", true, 1)
+		xt.Equal(t, []string{"ADD `id` int FIRST"}, got)
+	})
+
+	t.Run("AddColumn_no_after", func(t *testing.T) {
+		got := d.GenAddColumn("t", "`c` int", "", false, 1)
+		xt.Equal(t, []string{"ADD `c` int"}, got)
+	})
+
+	t.Run("merge_via_WrapAlterSQL", func(t *testing.T) {
+		var clauses []string
+		clauses = append(clauses, d.GenAddColumn("t", "`a` int", "x", false, 1)...)
+		clauses = append(clauses, d.GenAddColumn("t", "`b` int", "a", false, 1)...)
+		sqls := d.WrapAlterSQL("t", clauses, false)
+		xt.Equal(t, 1, len(sqls))
+		xt.Equal(t, "ALTER TABLE `t`\nADD `a` int AFTER `x`,\nADD `b` int AFTER `a`;", sqls[0])
+	})
+
+	t.Run("Index_and_FK_bare", func(t *testing.T) {
+		idx := &DbIndex{IndexType: indexTypeIndex, Name: "idx_a", SQL: "KEY `idx_a` (`a`)"}
+		add := d.GenAddIndex("t", idx, false)
+		xt.Equal(t, []string{"ADD KEY `idx_a` (`a`)"}, add)
+		drop := d.GenDropIndex("t", idx)
+		xt.Equal(t, []string{"DROP INDEX `idx_a`"}, drop)
+	})
+}
+
+// TestMySQLDialect_Idempotent_DefaultGuard 验证零值 dialect 仍生成守卫块（兼容既有行为）。
+func TestMySQLDialect_Idempotent_DefaultGuard(t *testing.T) {
+	d := &MySQLDialect{}
+	got := d.GenAddColumn("t", "`c` int", "x", false, 1)
+	xt.Equal(t, 4, len(got))
+	xt.Equal(t, true, strings.Contains(got[0], "__mss_sql"))
+}

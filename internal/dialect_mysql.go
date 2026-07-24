@@ -11,7 +11,12 @@ import (
 )
 
 // MySQLDialect implements Dialect for MySQL databases
-type MySQLDialect struct{}
+type MySQLDialect struct {
+	// PlainDDL 为 false（默认/零值）时各 ADD/DROP 生成 information_schema 守卫块（可重跑）；
+	// 为 true 时返回裸子句，交由 WrapAlterSQL 合并成单条 ALTER TABLE（更简洁，不可重跑）。
+	// 用 opt-out 语义保证零值 MySQLDialect{} 仍是幂等，兼容既有行为。
+	PlainDDL bool
+}
 
 func (m *MySQLDialect) DriverName() string { return "mysql" }
 
@@ -295,6 +300,17 @@ func (m *MySQLDialect) GenAddColumn(table, colDef, afterCol string, isFirst bool
 	default:
 		ddl = fmt.Sprintf("ALTER TABLE `%s` ADD %s AFTER `%s`", mysqlQuoteIdent(table), colDef, mysqlQuoteIdent(afterCol))
 	}
+	if m.PlainDDL {
+		// 非幂等：返回裸 ADD 子句（去掉 ALTER TABLE 前缀），交 WrapAlterSQL 合并。
+		switch {
+		case afterCol == "" && isFirst:
+			return []string{fmt.Sprintf("ADD %s FIRST", colDef)}
+		case afterCol == "":
+			return []string{fmt.Sprintf("ADD %s", colDef)}
+		default:
+			return []string{fmt.Sprintf("ADD %s AFTER `%s`", colDef, mysqlQuoteIdent(afterCol))}
+		}
+	}
 	where := fmt.Sprintf("TABLE_SCHEMA=DATABASE() AND TABLE_NAME='%s' AND COLUMN_NAME='%s'", mysqlEscapeSQLLiteral(table), mysqlEscapeSQLLiteral(mysqlColumnName(colDef)))
 	return mysqlGuard("information_schema.COLUMNS", where, ddl, false)
 }
@@ -317,6 +333,13 @@ func (m *MySQLDialect) GenDropColumn(table, colName string) []string {
 }
 
 func (m *MySQLDialect) GenAddIndex(tableName string, idx *DbIndex, needDrop bool) []string {
+	if m.PlainDDL {
+		var sqls []string
+		if needDrop {
+			sqls = append(sqls, idx.mysqlDropBody())
+		}
+		return append(sqls, idx.mysqlAddBody())
+	}
 	var sqls []string
 	if needDrop {
 		sqls = append(sqls, m.GenDropIndexGuard(tableName, idx)...)
@@ -336,10 +359,20 @@ func (m *MySQLDialect) GenDropIndexGuard(tableName string, idx *DbIndex) []strin
 }
 
 func (m *MySQLDialect) GenDropIndex(tableName string, idx *DbIndex) []string {
+	if m.PlainDDL {
+		return []string{idx.mysqlDropBody()}
+	}
 	return m.GenDropIndexGuard(tableName, idx)
 }
 
 func (m *MySQLDialect) GenAddForeignKey(tableName string, idx *DbIndex, needDrop bool) []string {
+	if m.PlainDDL {
+		var sqls []string
+		if needDrop {
+			sqls = append(sqls, idx.mysqlDropBody())
+		}
+		return append(sqls, idx.mysqlAddBody())
+	}
 	var sqls []string
 	if needDrop {
 		sqls = append(sqls, m.GenDropForeignKeyGuard(tableName, idx)...)
@@ -357,6 +390,9 @@ func (m *MySQLDialect) GenDropForeignKeyGuard(tableName string, idx *DbIndex) []
 }
 
 func (m *MySQLDialect) GenDropForeignKey(tableName string, idx *DbIndex) []string {
+	if m.PlainDDL {
+		return []string{idx.mysqlDropBody()}
+	}
 	return m.GenDropForeignKeyGuard(tableName, idx)
 }
 

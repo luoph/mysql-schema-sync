@@ -23,6 +23,7 @@ var tables = flag.String("tables", "", "tables to sync\neg : product_base,order_
 var tablesIgnore = flag.String("tables_ignore", "", "tables ignore sync\neg : product_base,order_*")
 var mailTo = flag.String("mail_to", "", "overwrite config's email.to")
 var singleSchemaChange = flag.Bool("single_schema_change", false, "single schema changes ddl command a single schema change")
+var idempotent = flag.Bool("idempotent", true, "generate idempotent re-runnable DDL\nset to false for compact merged DDL (MySQL: drop information_schema guards, not re-runnable)")
 
 func init() {
 	log.SetFlags(log.Lshortfile | log.Ldate)
@@ -51,6 +52,7 @@ func main() {
 	cfg.FieldOrder = *fieldOrder
 	cfg.HTTPAddress = *httpAddress
 	cfg.SingleSchemaChange = *singleSchemaChange
+	cfg.Idempotent = *idempotent
 
 	if len(*mailTo) != 0 && cfg.Email != nil {
 		cfg.Email.To = *mailTo
